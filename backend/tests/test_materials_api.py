@@ -2,7 +2,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, _set_store, _set_config_path
+from app.main import app, _set_store, _set_config_path, _set_progress_path
 from app.store import MaterialStore
 
 client = TestClient(app)
@@ -13,6 +13,7 @@ def _use_tmp_store(tmp_path):
     """Use temp files for each test."""
     _set_store(MaterialStore(tmp_path / "materials.json"))
     _set_config_path(tmp_path / "config.json")
+    _set_progress_path(tmp_path / "progress.json")
     yield
 
 
@@ -38,8 +39,25 @@ class TestCreateMaterial:
         assert body["segments"][0]["type"] == "text"
         assert "小王子" in body["segments"][0]["content"]
 
-
-class TestListMaterials:
+    def test_create_with_prebuilt_segments_preserves_images(self):
+        prebuilt = [
+            {"type": "text", "content": "图片前文字。"},
+            {"type": "image", "url": "https://example.com/img.jpg", "position": 6},
+            {"type": "text", "content": "图片后文字。"},
+        ]
+        response = client.post(
+            "/api/materials",
+            json={
+                "title": "带图素材",
+                "tags": "图",
+                "content": "图片前文字。图片后文字。",
+                "segments": prebuilt,
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["segments"] == prebuilt
+        assert any(s["type"] == "image" for s in body["segments"])
     """GET /api/materials"""
 
     def test_list_returns_all_materials(self):
@@ -336,3 +354,88 @@ class TestFetchTopic:
             json={"topic": "测试", "language": "zh", "length": "short"},
         )
         assert response.status_code == 200
+
+    def test_length_min_max_sends_range_to_prompt(self, monkeypatch):
+        import httpx
+
+        captured = {}
+
+        class MockResponse:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self):
+                return {"choices": [{"message": {"content": "生成的。"}}]}
+
+        def mock_post(url, **kw):
+            captured["prompt"] = kw["json"]["messages"][0]["content"]
+            return MockResponse()
+
+        monkeypatch.setattr(httpx, "post", mock_post)
+        monkeypatch.setenv("LLM_API_KEY", "test-key")
+
+        response = client.post(
+            "/api/fetch/topic",
+            json={"topic": "测试", "language": "zh", "lengthMin": 50, "lengthMax": 100},
+        )
+        assert response.status_code == 200
+        assert "50" in captured["prompt"]
+        assert "100" in captured["prompt"]
+
+
+class TestProgress:
+    """Progress CRUD API."""
+
+    def _create_material(self) -> str:
+        resp = client.post(
+            "/api/materials",
+            json={"title": "测试", "tags": "", "content": "第一句。第二句。第三句。"},
+        )
+        return resp.json()["id"]
+
+    def test_save_and_get_progress(self):
+        mat_id = self._create_material()
+        progress = {
+            "materialId": mat_id,
+            "currentSegmentIndex": 1,
+            "completedSegments": [0],
+            "segmentResults": [{"index": 0, "accuracy": 95, "timeMs": 3000}],
+            "isComplete": False,
+        }
+        resp = client.put(f"/api/progress/{mat_id}", json=progress)
+        assert resp.status_code == 200
+
+        resp = client.get(f"/api/progress/{mat_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["currentSegmentIndex"] == 1
+        assert body["completedSegments"] == [0]
+        assert body["segmentResults"][0]["accuracy"] == 95
+
+    def test_get_nonexistent_progress_returns_404(self):
+        resp = client.get("/api/progress/nonexistent")
+        assert resp.status_code == 404
+
+    def test_delete_progress(self):
+        mat_id = self._create_material()
+        client.put(f"/api/progress/{mat_id}", json={
+            "materialId": mat_id, "currentSegmentIndex": 1,
+            "completedSegments": [0], "segmentResults": [], "isComplete": False,
+        })
+        resp = client.delete(f"/api/progress/{mat_id}")
+        assert resp.status_code == 204
+
+        resp = client.get(f"/api/progress/{mat_id}")
+        assert resp.status_code == 404
+
+    def test_editing_material_clears_progress(self):
+        mat_id = self._create_material()
+        client.put(f"/api/progress/{mat_id}", json={
+            "materialId": mat_id, "currentSegmentIndex": 1,
+            "completedSegments": [0], "segmentResults": [], "isComplete": False,
+        })
+        # Update material content — should clear progress.
+        client.put(f"/api/materials/{mat_id}", json={
+            "title": "改过", "tags": "", "content": "新内容。",
+        })
+        resp = client.get(f"/api/progress/{mat_id}")
+        assert resp.status_code == 404

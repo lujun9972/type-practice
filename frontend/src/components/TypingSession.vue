@@ -45,12 +45,15 @@ interface Segment {
 }
 
 const props = withDefaults(
-  defineProps<{ segments: Segment[]; skipLimit?: number }>(),
-  { skipLimit: 3 },
+  defineProps<{ segments: Segment[]; skipLimit?: number; startIndex?: number }>(),
+  { skipLimit: 3, startIndex: 0 },
 );
-const emit = defineEmits<{ complete: [] }>();
+const emit = defineEmits<{
+  complete: [];
+  "segment-complete": [result: { index: number; accuracy: number; timeMs: number }];
+}>();
 
-const unlockedTextIndex = ref(0);
+const unlockedTextIndex = ref(props.startIndex);
 const skipRemaining = ref(props.skipLimit);
 const hintText = ref("");
 const isFinished = ref(false);
@@ -99,6 +102,16 @@ function activeSegment(): InstanceType<typeof TypingSegment> | undefined {
 
 function onSegmentComplete(textIndex: number) {
   if (textIndex !== unlockedTextIndex.value) return;
+
+  // Emit per-segment result.
+  const seg = segmentRefs.value[textIndex];
+  if (seg) {
+    const chars = seg.engine.chars;
+    const correct = chars.filter((c: { status: string }) => c.status === "correct").length;
+    const accuracy = chars.length > 0 ? Math.round((correct / chars.length) * 100) : 0;
+    emit("segment-complete", { index: textIndex, accuracy, timeMs: Date.now() - startTime.value });
+  }
+
   const nextUnlocked = unlockedTextIndex.value + 1;
 
   if (nextUnlocked < textSegments.value.length) {

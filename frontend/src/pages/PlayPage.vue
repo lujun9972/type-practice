@@ -35,12 +35,27 @@
           <option value="zh">中文</option>
           <option value="en">English</option>
         </select>
-        <select v-model="topicLength" :disabled="generating">
-          <option value="auto">自动</option>
-          <option value="short">短</option>
-          <option value="medium">中</option>
-          <option value="long">长</option>
-        </select>
+        <label class="auto-label">
+          <input type="checkbox" v-model="topicAuto" />
+          自动字数
+        </label>
+        <template v-if="!topicAuto">
+          <input
+            type="number"
+            v-model.number="topicMin"
+            placeholder="最少"
+            class="length-input"
+            :disabled="generating"
+          />
+          <span class="length-sep">~</span>
+          <input
+            type="number"
+            v-model.number="topicMax"
+            placeholder="最多"
+            class="length-input"
+            :disabled="generating"
+          />
+        </template>
         <button type="submit" :disabled="generating || !topicInput">
           {{ generating ? "生成中..." : "生成" }}
         </button>
@@ -71,18 +86,31 @@
       </div>
     </div>
 
+    <!-- Progress prompt -->
+    <div v-else-if="showPrompt" class="progress-prompt">
+      <h2>发现上次进度</h2>
+      <p>已完成 {{ savedProgress?.completedSegments.length }} / {{ activeMaterial?.segments.length }} 段</p>
+      <button class="btn-continue" @click="onContinue">继续</button>
+      <button class="btn-restart" @click="onRestart">重新开始</button>
+    </div>
+
     <!-- Typing session -->
     <div v-else>
       <button class="btn-back" @click="onBack">← 返回</button>
-      <TypingSession :segments="activeMaterial.segments" @complete="onComplete" />
+      <TypingSession
+        :segments="activeMaterial.segments"
+        :start-index="startIndex"
+        @complete="onComplete"
+        @segment-complete="onSegmentComplete"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import { listMaterials, getMaterial, fetchUrl, fetchTopic } from "@/api/materials";
-import type { Material } from "@/api/materials";
+import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress, deleteProgress } from "@/api/materials";
+import type { Material, Progress } from "@/api/materials";
 import TypingSession from "@/components/TypingSession.vue";
 
 const materials = ref<Material[]>([]);
@@ -92,14 +120,24 @@ const urlInput = ref("");
 const fetching = ref(false);
 const topicInput = ref("");
 const topicLang = ref("zh");
-const topicLength = ref("auto");
+const topicAuto = ref(true);
+const topicMin = ref<number | undefined>(undefined);
+const topicMax = ref<number | undefined>(undefined);
 const generating = ref(false);
 const loading = ref(false);
 const error = ref("");
+const savedProgress = ref<Progress | null>(null);
+const showPrompt = ref(false);
+const completedSegments = ref<number[]>([]);
+const segmentResults = ref<{ index: number; accuracy: number; timeMs: number }[]>([]);
 
 const filteredMaterials = computed(() => {
   if (!activeTag.value) return materials.value;
   return materials.value.filter((m) => m.tags.includes(activeTag.value));
+});
+
+const startIndex = computed(() => {
+  return savedProgress.value?.currentSegmentIndex ?? 0;
 });
 
 async function refresh() {
@@ -127,14 +165,42 @@ function clearFilter() {
 async function onSelect(mat: Material) {
   try {
     error.value = "";
-    if (mat.segments && mat.segments.length > 0) {
-      activeMaterial.value = mat;
+    const full = (mat.segments && mat.segments.length > 0) ? mat : await getMaterial(mat.id);
+    activeMaterial.value = full;
+
+    const progress = await getProgress(full.id);
+    if (progress) {
+      savedProgress.value = progress;
+      showPrompt.value = true;
     } else {
-      activeMaterial.value = await getMaterial(mat.id);
+      savedProgress.value = null;
+      showPrompt.value = false;
+      completedSegments.value = [];
+      segmentResults.value = [];
     }
   } catch (e) {
     error.value = "加载素材失败：" + (e instanceof Error ? e.message : String(e));
   }
+}
+
+function onContinue() {
+  if (savedProgress.value) {
+    completedSegments.value = [...savedProgress.value.completedSegments];
+    segmentResults.value = [...savedProgress.value.segmentResults];
+  }
+  showPrompt.value = false;
+}
+
+async function onRestart() {
+  if (activeMaterial.value) {
+    try {
+      await deleteProgress(activeMaterial.value.id);
+    } catch { /* ignore */ }
+  }
+  savedProgress.value = null;
+  showPrompt.value = false;
+  completedSegments.value = [];
+  segmentResults.value = [];
 }
 
 async function onFetchUrl() {
@@ -155,7 +221,12 @@ async function onGenerate() {
   try {
     generating.value = true;
     error.value = "";
-    activeMaterial.value = await fetchTopic(topicInput.value, topicLang.value, topicLength.value);
+    activeMaterial.value = await fetchTopic(topicInput.value, {
+      language: topicLang.value,
+      lengthAuto: topicAuto.value,
+      lengthMin: topicMin.value,
+      lengthMax: topicMax.value,
+    });
   } catch (e) {
     error.value = "生成失败：" + (e instanceof Error ? e.message : String(e));
   } finally {
@@ -165,10 +236,32 @@ async function onGenerate() {
 
 function onBack() {
   activeMaterial.value = null;
+  savedProgress.value = null;
+  showPrompt.value = false;
 }
 
 function onComplete() {
   alert("全部完成！");
+}
+
+async function onSegmentComplete(result: { index: number; accuracy: number; timeMs: number }) {
+  if (!activeMaterial.value) return;
+  completedSegments.value.push(result.index);
+  segmentResults.value.push(result);
+
+  const totalTextSegments = activeMaterial.value.segments.filter((s) => s.type === "text").length;
+  const nextIndex = result.index + 1;
+  const progress: Progress = {
+    materialId: activeMaterial.value.id,
+    currentSegmentIndex: nextIndex,
+    completedSegments: [...completedSegments.value],
+    segmentResults: [...segmentResults.value],
+    isComplete: nextIndex >= totalTextSegments,
+  };
+
+  try {
+    await saveProgress(progress);
+  } catch { /* ignore save failures */ }
 }
 </script>
 
@@ -330,5 +423,34 @@ h1 {
 .topic-form button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.auto-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #aaa;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.auto-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+}
+
+.length-input {
+  width: 70px;
+  padding: 0.5rem;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.9rem;
+}
+
+.length-sep {
+  color: #888;
+  line-height: 2;
 }
 </style>

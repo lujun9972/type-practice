@@ -13,7 +13,7 @@ _Avoid_: 行、段落、句子
 _Avoid_: 文章、内容、题目
 
 **Material Library**:
-预置的 Material 集合，通过浏览器管理页面添加和维护。
+预置的 Material 集合，通过管理页面添加和维护。支持查看详情、编辑、URL 抓取和 AI 生成。
 _Avoid_: 题库、素材库（作为技术术语时）
 
 **Unlock**:
@@ -32,6 +32,10 @@ _Avoid_: 跳跃、忽略
 打字判定模式——打错的字符标红，用户可退格修正，以退格后的最终结果判定对错。
 _Avoid_: 纠错模式、严格模式、宽松模式
 
+**Progress**:
+用户在某篇 Material 上的打字进度，记录到哪个 Segment 为止，以及每个已完成 Segment 的准确率和用时。存储在后端（单用户模式）。
+_Avoid_: 存档、记录
+
 ## Relationships
 
 - 一篇 **Material** 由多个 **Segment** 和可选的图片组成，按顺序排列
@@ -39,7 +43,12 @@ _Avoid_: 纠错模式、严格模式、宽松模式
 - 图片在用户打完其前方 **Segment** 后 **Unlock**
 - 用户可以随时使用 **Hint**（无限制）或 **Skip**（有限制）来应对困难
 - **Material** 有三个来源：**Material Library**、URL 抓取、LLM 话题生成
-- LLM 话题生成需要用户选择语言（中文/英文）和长度（短/中/长/自动）
+- URL 抓取和 AI 生成可在管理页预览、编辑标题/标签后保存到 Material Library
+- LLM 生成时用户可指定字数范围（最少-最多），也可选"自动"让 LLM 自行决定
+- 用户再次打开某篇 Material 时，提示"继续打"或"重新开始"
+- 继续 Progress 时，已打 Segment 显示成绩（只读），从断点开始打
+- 重新开始清空该 Material 的所有旧 Progress
+- Material 内容被编辑（导致重新分段）时，关联 Progress 自动清空
 
 ## Example dialogue
 
@@ -48,6 +57,9 @@ _Avoid_: 纠错模式、严格模式、宽松模式
 
 > **Dev:** "用户打 Segment 时遇到不会读的字，一直卡着怎么办？"
 > **Domain expert:** "可以点 Hint 看拼音，不限次数。也可以 Skip 跳过这段，但每篇 Material 只能跳过 3 次。"
+
+> **Dev:** "用户打到第 3 段关了浏览器，下次打开同一篇 Material 怎么办？"
+> **Domain expert:** "提示是继续还是重新开始。继续的话，前 2 段显示只读成绩，从第 3 段开始打。重新开始则清空旧 Progress。"
 
 ## Configuration
 

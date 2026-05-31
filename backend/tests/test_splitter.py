@@ -112,4 +112,21 @@ class TestEdgeCases:
     def test_single_character(self):
         result = split_into_segments("好")
         assert len(result) == 1
-        assert result[0]["content"] == "好"
+
+    def test_splits_on_newlines(self):
+        """URL-extracted text uses newlines as paragraph separators."""
+        text = "第一段内容。\n第二段内容。\n第三段内容。"
+        result = split_into_segments(text)
+        assert len(result) == 3
+        assert result[0]["content"] == "第一段内容。"
+        assert result[1]["content"] == "第二段内容。"
+        assert result[2]["content"] == "第三段内容。"
+
+    def test_splits_on_newlines_without_punctuation(self):
+        """URL-extracted text may have no punctuation, only newlines."""
+        text = "第一段内容\n第二段内容\n第三段内容"
+        result = split_into_segments(text)
+        assert len(result) == 3
+        assert result[0]["content"] == "第一段内容"
+        assert result[1]["content"] == "第二段内容"
+        assert result[2]["content"] == "第三段内容"

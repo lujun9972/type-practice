@@ -4,7 +4,8 @@ from __future__ import annotations
 import re
 
 # Characters that serve as natural split points.
-_SPLIT_POINTS = re.compile(r"(?<=[。！？；.!?])\s*")
+# Characters that serve as natural split points.
+_SPLIT_POINTS = re.compile(r"(?<=[。！？；.!?])\s*|\n+")
 _COMMA_SPLIT = re.compile(r"(?<=[，,、；;])")
 _HTML_TAG = re.compile(r"<[^>]+>")
 

@@ -21,6 +21,7 @@ app = FastAPI()
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _store: MaterialStore | None = None
 _config_path: Path | None = None
+_progress_path: Path | None = None
 
 CONFIG_DEFAULTS = {
     "skipPunctuation": True,
@@ -69,10 +70,35 @@ def _save_config(config: dict) -> None:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 
+def _set_progress_path(path: Path) -> None:
+    global _progress_path
+    _progress_path = path
+
+
+def _get_progress_path() -> Path:
+    return _progress_path or DATA_DIR / "progress.json"
+
+
+def _load_progress() -> dict:
+    path = _get_progress_path()
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_progress(data: dict) -> None:
+    path = _get_progress_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 class MaterialCreate(BaseModel):
     title: str
     tags: str  # comma-separated
     content: str
+    segments: Optional[list[dict]] = None  # pre-built segments (preserves images)
 
 
 class UrlFetch(BaseModel):
@@ -83,6 +109,8 @@ class TopicFetch(BaseModel):
     topic: str
     language: Literal["zh", "en"] = "zh"
     length: Literal["short", "medium", "long", "auto"] = "auto"
+    lengthMin: Optional[int] = None
+    lengthMax: Optional[int] = None
 
 
 class LlmConfig(BaseModel):
@@ -136,7 +164,7 @@ def split_preview(payload: MaterialCreate):
 @app.post("/api/materials", status_code=201)
 def create_material(payload: MaterialCreate):
     store = _get_store()
-    segments = split_into_segments(payload.content)
+    segments = payload.segments if payload.segments else split_into_segments(payload.content)
     material = {
         "id": uuid.uuid4().hex[:12],
         "title": payload.title,
@@ -172,7 +200,7 @@ def update_material(material_id: str, payload: MaterialCreate):
     material = store.get(material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
-    segments = split_into_segments(payload.content)
+    segments = payload.segments if payload.segments else split_into_segments(payload.content)
     material.update({
         "title": payload.title,
         "tags": [t.strip() for t in payload.tags.split(",") if t.strip()],
@@ -180,6 +208,11 @@ def update_material(material_id: str, payload: MaterialCreate):
         "segments": segments,
     })
     store.save(material)
+    # Editing content invalidates progress.
+    progress = _load_progress()
+    if material_id in progress:
+        del progress[material_id]
+        _save_progress(progress)
     return material
 
 
@@ -188,6 +221,32 @@ def delete_material(material_id: str):
     store = _get_store()
     if not store.delete(material_id):
         raise HTTPException(status_code=404, detail="Material not found")
+
+
+@app.get("/api/progress/{material_id}")
+def get_progress(material_id: str):
+    progress = _load_progress()
+    if material_id not in progress:
+        raise HTTPException(status_code=404, detail="No progress found")
+    return progress[material_id]
+
+
+@app.put("/api/progress/{material_id}")
+def save_progress(material_id: str, payload: dict):
+    progress = _load_progress()
+    payload["materialId"] = material_id
+    progress[material_id] = payload
+    _save_progress(progress)
+    return payload
+
+
+@app.delete("/api/progress/{material_id}", status_code=204)
+def delete_progress(material_id: str):
+    progress = _load_progress()
+    if material_id not in progress:
+        raise HTTPException(status_code=404, detail="No progress found")
+    del progress[material_id]
+    _save_progress(progress)
 
 
 @app.post("/api/fetch/url")
@@ -228,7 +287,10 @@ def fetch_topic(payload: TopicFetch):
     base_url = os.environ.get("LLM_BASE_URL") or llm.get("baseUrl") or LLM_BASE_URL
     model = os.environ.get("LLM_MODEL") or llm.get("model") or LLM_MODEL
 
-    length_instruction = LENGTH_MAP.get(payload.length, LENGTH_MAP["auto"])
+    if payload.lengthMin is not None and payload.lengthMax is not None:
+        length_instruction = f"{payload.lengthMin}-{payload.lengthMax}字"
+    else:
+        length_instruction = LENGTH_MAP.get(payload.length, LENGTH_MAP["auto"])
     lang_name = "中文" if payload.language == "zh" else "English"
 
     system_prompt = (

@@ -30,6 +30,7 @@ export async function createMaterial(data: {
   title: string;
   tags: string;
   content: string;
+  segments?: Segment[];
 }): Promise<Material> {
   const res = await fetch(`${API_BASE}/materials`, {
     method: "POST",
@@ -41,7 +42,7 @@ export async function createMaterial(data: {
 
 export async function updateMaterial(
   id: string,
-  data: { title: string; tags: string; content: string },
+  data: { title: string; tags: string; content: string; segments?: Segment[] },
 ): Promise<Material> {
   const res = await fetch(`${API_BASE}/materials/${id}`, {
     method: "PUT",
@@ -78,15 +79,30 @@ export async function fetchUrl(url: string): Promise<Material> {
   return res.json();
 }
 
+export interface TopicOptions {
+  language: string;
+  lengthAuto: boolean;
+  lengthMin?: number;
+  lengthMax?: number;
+}
+
 export async function fetchTopic(
   topic: string,
-  language: string,
-  length: string,
+  options: TopicOptions,
 ): Promise<Material> {
+  const body: Record<string, unknown> = {
+    topic,
+    language: options.language,
+    length: "auto",
+  };
+  if (!options.lengthAuto && options.lengthMin != null && options.lengthMax != null) {
+    body.lengthMin = options.lengthMin;
+    body.lengthMax = options.lengthMax;
+  }
   const res = await fetch(`${API_BASE}/fetch/topic`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, language, length }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -119,4 +135,37 @@ export async function updateConfig(config: AppConfig): Promise<AppConfig> {
     body: JSON.stringify(config),
   });
   return res.json();
+}
+
+export interface SegmentResult {
+  index: number;
+  accuracy: number;
+  timeMs: number;
+}
+
+export interface Progress {
+  materialId: string;
+  currentSegmentIndex: number;
+  completedSegments: number[];
+  segmentResults: SegmentResult[];
+  isComplete: boolean;
+}
+
+export async function getProgress(materialId: string): Promise<Progress | null> {
+  const res = await fetch(`${API_BASE}/progress/${materialId}`);
+  if (res.status === 404) return null;
+  return res.json();
+}
+
+export async function saveProgress(progress: Progress): Promise<Progress> {
+  const res = await fetch(`${API_BASE}/progress/${progress.materialId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(progress),
+  });
+  return res.json();
+}
+
+export async function deleteProgress(materialId: string): Promise<void> {
+  await fetch(`${API_BASE}/progress/${materialId}`, { method: "DELETE" });
 }

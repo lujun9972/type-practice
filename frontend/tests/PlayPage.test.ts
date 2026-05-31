@@ -9,9 +9,12 @@ vi.mock("@/api/materials", () => ({
   getMaterial: vi.fn(),
   fetchUrl: vi.fn(),
   fetchTopic: vi.fn(),
+  getProgress: vi.fn(),
+  saveProgress: vi.fn(),
+  deleteProgress: vi.fn(),
 }));
 
-import { listMaterials, getMaterial, fetchUrl, fetchTopic } from "@/api/materials";
+import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress } from "@/api/materials";
 
 const MOCK_MATERIALS: Material[] = [
   {
@@ -206,7 +209,7 @@ describe("PlayPage — topic generate", () => {
     await wrapper.find("form.topic-form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(fetchTopic).toHaveBeenCalledWith("恐龙", "zh", "auto");
+    expect(fetchTopic).toHaveBeenCalledWith("恐龙", { language: "zh", lengthAuto: true });
     expect(wrapper.findComponent({ name: "TypingSession" }).exists()).toBe(true);
   });
 
@@ -221,5 +224,77 @@ describe("PlayPage — topic generate", () => {
     await flushPromises();
 
     expect(wrapper.find(".error-banner").text()).toContain("生成失败");
+  });
+});
+
+describe("PlayPage — progress prompt", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows continue/restart prompt when progress exists", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(getProgress).mockResolvedValue({
+      materialId: "mat1",
+      currentSegmentIndex: 1,
+      completedSegments: [0],
+      segmentResults: [{ index: 0, accuracy: 95, timeMs: 3000 }],
+      isComplete: false,
+    });
+
+    const wrapper = await mountPlay();
+
+    await wrapper.find(".material-card").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".progress-prompt").exists()).toBe(true);
+    expect(wrapper.find(".progress-prompt").text()).toContain("继续");
+    expect(wrapper.find(".progress-prompt").text()).toContain("重新开始");
+  });
+
+  it("no prompt when no progress exists", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(getProgress).mockResolvedValue(null);
+    vi.mocked(getMaterial).mockResolvedValue(MOCK_MATERIALS[0]);
+
+    const wrapper = await mountPlay();
+
+    await wrapper.find(".material-card").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".progress-prompt").exists()).toBe(false);
+    expect(wrapper.findComponent({ name: "TypingSession" }).exists()).toBe(true);
+  });
+});
+
+describe("PlayPage — progress save", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("saves progress after segment complete", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(getProgress).mockResolvedValue(null);
+    vi.mocked(getMaterial).mockResolvedValue(MOCK_MATERIALS[0]);
+    vi.mocked(saveProgress).mockResolvedValue({
+      materialId: "mat1",
+      currentSegmentIndex: 1,
+      completedSegments: [0],
+      segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000 }],
+      isComplete: false,
+    });
+
+    const wrapper = await mountPlay();
+
+    await wrapper.find(".material-card").trigger("click");
+    await flushPromises();
+
+    const session = wrapper.findComponent({ name: "TypingSession" });
+    session.vm.$emit("segment-complete", { index: 0, accuracy: 95, timeMs: 1000 });
+    await flushPromises();
+
+    expect(saveProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        materialId: "mat1",
+        completedSegments: [0],
+        segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000 }],
+      }),
+    );
   });
 });

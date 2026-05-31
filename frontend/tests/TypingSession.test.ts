@@ -158,6 +158,30 @@ describe("TypingSession — image unlock", () => {
   });
 });
 
+describe("TypingSession — segment-complete event", () => {
+  it("emits segment-complete with index after each text segment", async () => {
+    const wrapper = mount(TypingSession, {
+      props: { segments: THREE_SEGMENTS },
+    });
+    await completeSegment(wrapper, 0);
+    const events = wrapper.emitted("segment-complete");
+    expect(events).toBeTruthy();
+    expect(events!.length).toBe(1);
+    expect(events![0][0]).toMatchObject({ index: 0 });
+  });
+});
+
+describe("TypingSession — startIndex", () => {
+  it("starts at specified segment index, showing earlier segments as completed", async () => {
+    const wrapper = mount(TypingSession, {
+      props: { segments: THREE_SEGMENTS, startIndex: 1 },
+    });
+    // Should show all segments up to index 1 (inclusive), meaning 2 visible.
+    const wrappers = wrapper.findAll(".segment-wrapper");
+    expect(wrappers).toHaveLength(2);
+  });
+});
+
 describe("TypingSession — results", () => {
   it("shows result overlay when all segments completed", async () => {
     const wrapper = mount(TypingSession, {

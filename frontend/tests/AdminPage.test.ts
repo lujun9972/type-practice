@@ -10,9 +10,13 @@ vi.mock("@/api/materials", () => ({
   createMaterial: vi.fn(),
   deleteMaterial: vi.fn(),
   previewSegments: vi.fn(),
+  getMaterial: vi.fn(),
+  updateMaterial: vi.fn(),
+  fetchUrl: vi.fn(),
+  fetchTopic: vi.fn(),
 }));
 
-import { listMaterials, createMaterial, deleteMaterial, previewSegments } from "@/api/materials";
+import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic } from "@/api/materials";
 
 const MOCK_MATERIALS: Material[] = [
   {
@@ -179,5 +183,229 @@ describe("AdminPage — error handling", () => {
     await flushPromises();
 
     expect(wrapper.find(".error-banner").text()).toContain("创建失败");
+  });
+});
+
+describe("AdminPage — view detail", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("clicking material card shows detail with content, segments and word count", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    // Click the first material card.
+    await wrapper.find(".material-item").trigger("click");
+    await flushPromises();
+
+    // Detail view should show title, tags, content, segments, word count.
+    expect(wrapper.find(".detail-view").exists()).toBe(true);
+    expect(wrapper.find(".detail-view").text()).toContain("小王子");
+    expect(wrapper.find(".detail-view").text()).toContain("从前有一个小王子。他住在一颗小行星上。");
+    expect(wrapper.find(".detail-view").text()).toContain("从前有一个小王子");
+    expect(wrapper.find(".detail-view").text()).toContain("19 字");
+  });
+
+  it("back button returns to material list", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".material-item").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".detail-view").exists()).toBe(true);
+
+    await wrapper.find(".btn-back").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".detail-view").exists()).toBe(false);
+    expect(wrapper.findAll(".material-item")).toHaveLength(2);
+  });
+});
+
+describe("AdminPage — edit", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("edit button shows form, save updates material", async () => {
+    const updated: Material = {
+      ...MOCK_MATERIALS[0],
+      title: "新标题",
+      tags: ["新标签"],
+      content: "新内容。很好。",
+      segments: [{ type: "text", content: "新内容。很好。" }],
+    };
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(updateMaterial).mockResolvedValue(updated);
+    vi.mocked(listMaterials).mockResolvedValue([updated, MOCK_MATERIALS[1]]);
+
+    const wrapper = await mountAdmin();
+
+    // Enter detail view.
+    await wrapper.find(".material-item").trigger("click");
+    await flushPromises();
+
+    // Click edit.
+    await wrapper.find(".btn-edit").trigger("click");
+    await flushPromises();
+
+    // Edit form should be visible.
+    expect(wrapper.find(".edit-form").exists()).toBe(true);
+
+    // Modify fields.
+    await wrapper.find('.edit-form input[name="title"]').setValue("新标题");
+    await wrapper.find('.edit-form input[name="tags"]').setValue("新标签");
+    await wrapper.find('.edit-form textarea[name="content"]').setValue("新内容。很好。");
+    await wrapper.find(".edit-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateMaterial).toHaveBeenCalledWith("abc123", {
+      title: "新标题",
+      tags: "新标签",
+      content: "新内容。很好。",
+    });
+  });
+
+  it("editing material with images shows read-only content and preserves segments", async () => {
+    const matWithImages: Material = {
+      id: "img1",
+      title: "带图文章",
+      tags: ["图文"],
+      content: "图片前文字。图片后文字。",
+      segments: [
+        { type: "text", content: "图片前文字。" },
+        { type: "image", url: "https://example.com/a.jpg", position: 5 },
+        { type: "text", content: "图片后文字。" },
+      ],
+    };
+    const updated: Material = {
+      ...matWithImages,
+      title: "新标题",
+      tags: ["新标签"],
+    };
+    vi.mocked(listMaterials).mockResolvedValue([matWithImages]);
+    vi.mocked(updateMaterial).mockResolvedValue(updated);
+    vi.mocked(listMaterials).mockResolvedValue([updated]);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".material-item").trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".btn-edit").trigger("click");
+    await flushPromises();
+
+    // Content should NOT be a textarea — images can't be edited in plain text.
+    expect(wrapper.find('.edit-form textarea[name="content"]').exists()).toBe(false);
+    // Content should be shown as read-only text.
+    expect(wrapper.find(".edit-content-readonly").exists()).toBe(true);
+
+    // Edit title/tags only.
+    await wrapper.find('.edit-form input[name="title"]').setValue("新标题");
+    await wrapper.find('.edit-form input[name="tags"]').setValue("新标签");
+    await wrapper.find(".edit-form").trigger("submit.prevent");
+    await flushPromises();
+
+    // Should pass original segments to preserve images.
+    expect(updateMaterial).toHaveBeenCalledWith("img1", expect.objectContaining({
+      title: "新标题",
+      tags: "新标签",
+      segments: matWithImages.segments,
+    }));
+  });
+});
+
+describe("AdminPage — URL fetch preview & save", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("URL fetch shows preview, then save to library", async () => {
+    const fetched: Material = {
+      id: "url1",
+      title: "article",
+      tags: [],
+      content: "抓取的内容。继续阅读。",
+      segments: [
+        { type: "text", content: "抓取的内容。" },
+        { type: "text", content: "继续阅读。" },
+      ],
+    };
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(fetchUrl).mockResolvedValue(fetched);
+    const saved = { ...fetched, id: "saved1", title: "我的文章", tags: ["抓取"] };
+    vi.mocked(createMaterial).mockResolvedValue(saved);
+    vi.mocked(listMaterials).mockResolvedValue([...MOCK_MATERIALS, saved]);
+
+    const wrapper = await mountAdmin();
+
+    // Enter URL and submit.
+    await wrapper.find('input[name="admin-url"]').setValue("https://example.com/article");
+    await wrapper.find("form.url-fetch-form").trigger("submit.prevent");
+    await flushPromises();
+
+    // Preview should be visible.
+    expect(wrapper.find(".fetch-preview").exists()).toBe(true);
+    expect(wrapper.find(".fetch-preview").text()).toContain("抓取的内容");
+
+    // Edit title and tags before saving.
+    await wrapper.find('.fetch-preview input[name="preview-title"]').setValue("我的文章");
+    await wrapper.find('.fetch-preview input[name="preview-tags"]').setValue("抓取");
+    await wrapper.find(".btn-save-preview").trigger("click");
+    await flushPromises();
+
+    expect(createMaterial).toHaveBeenCalledWith({
+      title: "我的文章",
+      tags: "抓取",
+      content: "抓取的内容。继续阅读。",
+      segments: fetched.segments,
+    });
+  });
+
+  it("discard button clears preview", async () => {
+    const fetched: Material = {
+      id: "url1", title: "test", tags: [], content: "内容。",
+      segments: [{ type: "text", content: "内容。" }],
+    };
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(fetchUrl).mockResolvedValue(fetched);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find('input[name="admin-url"]').setValue("https://example.com");
+    await wrapper.find("form.url-fetch-form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find(".fetch-preview").exists()).toBe(true);
+
+    await wrapper.find(".btn-discard-preview").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".fetch-preview").exists()).toBe(false);
+  });
+});
+
+describe("AdminPage — AI generate preview & save", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("AI generate shows preview, then save to library", async () => {
+    const generated: Material = {
+      id: "gen1", title: "恐龙", tags: [],
+      content: "很久很久以前。恐龙统治地球。",
+      segments: [
+        { type: "text", content: "很久很久以前。" },
+        { type: "text", content: "恐龙统治地球。" },
+      ],
+    };
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(fetchTopic).mockResolvedValue(generated);
+    vi.mocked(createMaterial).mockResolvedValue(generated);
+    vi.mocked(listMaterials).mockResolvedValue([...MOCK_MATERIALS, generated]);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find('input[name="admin-topic"]').setValue("恐龙");
+    await wrapper.find("form.topic-gen-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(wrapper.find(".fetch-preview").exists()).toBe(true);
+    expect(wrapper.find(".fetch-preview").text()).toContain("恐龙");
+
+    await wrapper.find(".btn-save-preview").trigger("click");
+    await flushPromises();
+
+    expect(createMaterial).toHaveBeenCalled();
   });
 });
