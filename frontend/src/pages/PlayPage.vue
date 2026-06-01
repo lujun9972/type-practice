@@ -100,6 +100,7 @@
       <TypingSession
         :segments="activeMaterial.segments"
         :start-index="startIndex"
+        :mode="typingMode"
         @complete="onComplete"
         @segment-complete="onSegmentComplete"
       />
@@ -109,7 +110,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress, deleteProgress } from "@/api/materials";
+import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress, deleteProgress, getConfig } from "@/api/materials";
 import type { Material, Progress } from "@/api/materials";
 import TypingSession from "@/components/TypingSession.vue";
 
@@ -117,6 +118,7 @@ const materials = ref<Material[]>([]);
 const activeMaterial = ref<Material | null>(null);
 const activeTag = ref("");
 const urlInput = ref("");
+const typingMode = ref<"typing" | "pinyin">("typing");
 const fetching = ref(false);
 const topicInput = ref("");
 const topicLang = ref("zh");
@@ -145,6 +147,8 @@ async function refresh() {
     loading.value = true;
     error.value = "";
     materials.value = await listMaterials();
+    const config = await getConfig();
+    typingMode.value = config.typingMode || "typing";
   } catch (e) {
     error.value = "加载失败：" + (e instanceof Error ? e.message : String(e));
   } finally {

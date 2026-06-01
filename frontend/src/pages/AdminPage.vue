@@ -189,6 +189,7 @@ import {
   authSetup,
   authLogin,
   setToken,
+  clearToken,
   getToken,
 } from "@/api/materials";
 import type { Material, Segment } from "@/api/materials";
@@ -204,6 +205,15 @@ const editForm = reactive({ title: "", tags: "", content: "" });
 const editHasImages = computed(() =>
   editingMaterial.value?.segments.some((s) => s.type === "image") ?? false,
 );
+
+function handleAuthError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes("Invalid token") || msg.includes("Not authenticated")) {
+    clearToken();
+    authenticated.value = false;
+  }
+  return msg;
+}
 
 const form = reactive({
   title: "",
@@ -294,7 +304,7 @@ async function onSaveEdit() {
     const found = materials.value.find((m) => m.id === updated.id);
     if (found) detailMaterial.value = found;
   } catch (e) {
-    error.value = "保存失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "保存失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }
@@ -315,7 +325,7 @@ async function onCreate() {
     previewData.value = [];
     await refresh();
   } catch (e) {
-    error.value = "创建失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "创建失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }
@@ -328,7 +338,7 @@ async function onPreview() {
     error.value = "";
     previewData.value = await previewSplit(form.content);
   } catch (e) {
-    error.value = "预览失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "预览失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }
@@ -343,7 +353,7 @@ async function onDelete(id: string) {
     }
     await refresh();
   } catch (e) {
-    error.value = "删除失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "删除失败：" + handleAuthError(e);
   }
 }
 
@@ -357,7 +367,7 @@ async function onFetchUrl() {
     previewForm.title = mat.title;
     previewForm.tags = mat.tags.join(", ");
   } catch (e) {
-    error.value = "抓取失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "抓取失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }
@@ -378,7 +388,7 @@ async function onGenerate() {
     previewForm.title = mat.title;
     previewForm.tags = mat.tags.join(", ");
   } catch (e) {
-    error.value = "生成失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "生成失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }
@@ -400,7 +410,7 @@ async function onSavePreview() {
     topicInput.value = "";
     await refresh();
   } catch (e) {
-    error.value = "保存失败：" + (e instanceof Error ? e.message : String(e));
+    error.value = "保存失败：" + handleAuthError(e);
   } finally {
     loading.value = false;
   }

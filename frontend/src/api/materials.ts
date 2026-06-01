@@ -128,6 +128,7 @@ export interface LlmConfig {
 export interface AppConfig {
   skipPunctuation: boolean;
   skipLimit: number;
+  typingMode: "typing" | "pinyin";
   llm: LlmConfig;
 }
 
@@ -139,9 +140,13 @@ export async function getConfig(): Promise<AppConfig> {
 export async function updateConfig(config: AppConfig): Promise<AppConfig> {
   const res = await fetch(`${API_BASE}/config`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(config),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Save failed (${res.status})`);
+  }
   return res.json();
 }
 

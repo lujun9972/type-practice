@@ -28,6 +28,7 @@ _progress_path: Path | None = None
 CONFIG_DEFAULTS = {
     "skipPunctuation": True,
     "skipLimit": 3,
+    "typingMode": "typing",
     "llm": {
         "baseUrl": os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
         "apiKey": "",
@@ -191,6 +192,7 @@ class LlmConfig(BaseModel):
 class ConfigUpdate(BaseModel):
     skipPunctuation: bool = True
     skipLimit: int = 3
+    typingMode: Literal["typing", "pinyin"] = "typing"
     llm: LlmConfig = LlmConfig()
 
 

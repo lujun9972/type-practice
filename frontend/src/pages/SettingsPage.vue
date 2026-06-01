@@ -39,6 +39,16 @@
       </fieldset>
 
       <fieldset>
+        <legend>练习模式</legend>
+        <label class="field">
+          <select v-model="config.typingMode">
+            <option value="typing">打字模式</option>
+            <option value="pinyin">拼音模式</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <fieldset>
         <legend>LLM 设置</legend>
 
         <label class="field">
@@ -83,7 +93,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { getConfig, updateConfig, getAuthStatus, authSetup, authLogin, setToken, getToken, authChangePassword } from "@/api/materials";
+import { getConfig, updateConfig, getAuthStatus, authSetup, authLogin, setToken, clearToken, getToken, authChangePassword } from "@/api/materials";
 import type { AppConfig } from "@/api/materials";
 
 const config = ref<AppConfig | null>(null);
@@ -153,7 +163,12 @@ async function onChangePassword() {
     newPassword.value = "";
     setTimeout(() => { passwordChanged.value = false; }, 2000);
   } catch (e) {
-    error.value = "修改密码失败：" + (e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("Invalid token") || msg.includes("Not authenticated")) {
+      clearToken();
+      authenticated.value = false;
+    }
+    error.value = "修改密码失败：" + msg;
   } finally {
     saving.value = false;
   }
@@ -169,7 +184,12 @@ async function onSave() {
     saved.value = true;
     setTimeout(() => { saved.value = false; }, 2000);
   } catch (e) {
-    error.value = "保存失败：" + (e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("Invalid token") || msg.includes("Not authenticated")) {
+      clearToken();
+      authenticated.value = false;
+    }
+    error.value = "保存失败：" + msg;
   } finally {
     saving.value = false;
   }
@@ -209,7 +229,8 @@ legend {
 
 .field input[type="text"],
 .field input[type="password"],
-.field input[type="number"] {
+.field input[type="number"],
+.field select {
   padding: 0.5rem;
   background: #2a2a4a;
   border: 1px solid #444;

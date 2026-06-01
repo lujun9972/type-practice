@@ -118,4 +118,46 @@ describe("TypingSegment", () => {
     expect(chars[2].classes()).toContain("correct");
     expect(wrapper.emitted("complete")).toBeTruthy();
   });
+
+  it("ignores backspace during IME composition", async () => {
+    const wrapper = mount(TypingSegment, { props: { text: "你好" } });
+    await typeIME(wrapper, "你");
+    // Start new composition
+    wrapper.find(".typing-input").trigger("compositionstart");
+    // Press backspace during composition — should NOT erase "你"
+    await wrapper.find(".typing-input").trigger("keydown", { key: "Backspace" });
+    expect(wrapper.findAll(".char")[0].classes()).toContain("correct");
+  });
+});
+
+describe("TypingSegment — pinyin mode", () => {
+  it("shows pinyin annotations above Chinese characters", () => {
+    const wrapper = mount(TypingSegment, { props: { text: "你好", mode: "pinyin" } });
+    const annotations = wrapper.findAll(".pinyin-annotation");
+    expect(annotations.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("types pinyin letters to match Chinese characters", async () => {
+    const wrapper = mount(TypingSegment, { props: { text: "你好", mode: "pinyin" } });
+    // 你 -> ni, 好 -> hao
+    await typeDirect(wrapper, "n");
+    await typeDirect(wrapper, "i");
+    const chars = wrapper.findAll(".char");
+    expect(chars[0].classes()).toContain("correct");
+  });
+
+  it("auto-skips punctuation in pinyin mode (shows as correct)", () => {
+    const wrapper = mount(TypingSegment, { props: { text: "你好。", mode: "pinyin" } });
+    const chars = wrapper.findAll(".char");
+    // 。 should be auto-handled and show as correct (green)
+    expect(chars[2].classes()).toContain("correct");
+  });
+
+  it("emits complete when all pinyin typed correctly", async () => {
+    const wrapper = mount(TypingSegment, { props: { text: "你", mode: "pinyin" } });
+    // 你 -> ni
+    await typeDirect(wrapper, "n");
+    await typeDirect(wrapper, "i");
+    expect(wrapper.emitted("complete")).toBeTruthy();
+  });
 });

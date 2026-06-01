@@ -6,6 +6,7 @@
         <TypingSegment
           ref="segmentRefs"
           :text="node.content"
+          :mode="mode"
           @complete="onSegmentComplete(textIndexOf(node))"
         />
       </div>
@@ -45,8 +46,8 @@ interface Segment {
 }
 
 const props = withDefaults(
-  defineProps<{ segments: Segment[]; skipLimit?: number; startIndex?: number }>(),
-  { skipLimit: 3, startIndex: 0 },
+  defineProps<{ segments: Segment[]; skipLimit?: number; startIndex?: number; mode?: "typing" | "pinyin" }>(),
+  { skipLimit: 3, startIndex: 0, mode: "typing" },
 );
 const emit = defineEmits<{
   complete: [];
@@ -106,7 +107,7 @@ function onSegmentComplete(textIndex: number) {
   // Emit per-segment result.
   const seg = segmentRefs.value[textIndex];
   if (seg) {
-    const chars = seg.engine.chars;
+    const chars = props.mode === "pinyin" ? seg.pinyinEngine.chars : seg.engine.chars;
     const correct = chars.filter((c: { status: string }) => c.status === "correct").length;
     const accuracy = chars.length > 0 ? Math.round((correct / chars.length) * 100) : 0;
     emit("segment-complete", { index: textIndex, accuracy, timeMs: Date.now() - startTime.value });
@@ -134,7 +135,7 @@ const elapsedTime = computed(() => {
 const accuracy = computed(() => {
   const all = segmentRefs.value.flatMap((seg) => {
     if (!seg) return [];
-    return seg.engine.chars;
+    return props.mode === "pinyin" ? seg.pinyinEngine.chars : seg.engine.chars;
   });
   const correct = all.filter((c) => c.status === "correct").length;
   const total = all.length;
@@ -144,7 +145,7 @@ const accuracy = computed(() => {
 const speed = computed(() => {
   const all = segmentRefs.value.flatMap((seg) => {
     if (!seg) return [];
-    return seg.engine.chars;
+    return props.mode === "pinyin" ? seg.pinyinEngine.chars : seg.engine.chars;
   });
   const total = all.length;
   const minutes = (Date.now() - startTime.value) / 60000;
@@ -156,7 +157,9 @@ function onHint() {
   if (!seg) return;
   const char = seg.hint();
   if (!char) return;
-  if (/[\u4e00-\u9fff]/.test(char)) {
+  if (props.mode === "pinyin") {
+    hintText.value = char;
+  } else if (/[\u4e00-\u9fff]/.test(char)) {
     hintText.value = getPinyin(char, { toneType: "symbol" });
   } else {
     hintText.value = char;
