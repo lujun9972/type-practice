@@ -6,9 +6,16 @@ import SettingsPage from "@/pages/SettingsPage.vue";
 vi.mock("@/api/materials", () => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
+  getAuthStatus: vi.fn(() => Promise.resolve({ passwordSet: true })),
+  authSetup: vi.fn(),
+  authLogin: vi.fn(),
+  setToken: vi.fn(),
+  clearToken: vi.fn(),
+  getToken: vi.fn(() => "existing-token"),
+  authChangePassword: vi.fn(),
 }));
 
-import { getConfig, updateConfig } from "@/api/materials";
+import { getConfig, updateConfig, getAuthStatus, authLogin, setToken, getToken, authChangePassword } from "@/api/materials";
 
 const DEFAULT_CONFIG = {
   skipPunctuation: true,
@@ -84,5 +91,60 @@ describe("SettingsPage", () => {
     await flushPromises();
 
     expect(wrapper.find(".error-banner").text()).toContain("保存失败");
+  });
+});
+
+describe("SettingsPage — auth gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getToken).mockReturnValue(null);
+  });
+
+  it("shows login form when not authenticated", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValue({ passwordSet: true });
+    const wrapper = await mountSettings();
+
+    expect(wrapper.find(".auth-form").exists()).toBe(true);
+    expect(wrapper.find(".auth-form").text()).toContain("输入密码");
+  });
+
+  it("login shows settings content", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValueOnce({ passwordSet: true });
+    vi.mocked(authLogin).mockResolvedValue({ token: "test-token" });
+    vi.mocked(getConfig).mockResolvedValue(DEFAULT_CONFIG);
+
+    const wrapper = await mountSettings();
+
+    await wrapper.find('input[name="auth-password"]').setValue("mypassword");
+    await wrapper.find(".auth-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(authLogin).toHaveBeenCalledWith("mypassword");
+    expect(setToken).toHaveBeenCalledWith("test-token");
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(true);
+  });
+});
+
+describe("SettingsPage — password change", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getToken).mockReturnValue("existing-token");
+  });
+
+  it("shows password change section and submits", async () => {
+    vi.mocked(getConfig).mockResolvedValue(DEFAULT_CONFIG);
+    vi.mocked(authChangePassword).mockResolvedValue(undefined);
+
+    const wrapper = await mountSettings();
+
+    expect(wrapper.find(".password-change").exists()).toBe(true);
+
+    await wrapper.find('input[name="current-password"]').setValue("oldpass");
+    await wrapper.find('input[name="new-password"]').setValue("newpass");
+    await wrapper.find(".password-change form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(authChangePassword).toHaveBeenCalledWith("oldpass", "newpass");
+    expect(wrapper.find(".success-banner").text()).toContain("密码已修改");
   });
 });

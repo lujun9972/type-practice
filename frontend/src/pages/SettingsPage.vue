@@ -2,8 +2,25 @@
   <div>
     <h1>设置</h1>
 
-    <div v-if="loading" class="loading">加载中...</div>
     <div v-if="error" class="error-banner">{{ error }}</div>
+
+    <!-- Auth gate -->
+    <div v-if="!authenticated" class="auth-form-wrapper">
+      <form class="auth-form" @submit.prevent="onAuthSubmit">
+        <label>{{ passwordSet ? "输入密码" : "设置密码" }}</label>
+        <input
+          name="auth-password"
+          type="password"
+          v-model="authPassword"
+          :placeholder="passwordSet ? '密码' : '设置管理密码'"
+          required
+        />
+        <button type="submit">{{ passwordSet ? "确认" : "设置" }}</button>
+      </form>
+    </div>
+
+    <template v-if="authenticated">
+    <div v-if="loading" class="loading">加载中...</div>
     <div v-if="saved" class="success-banner">已保存</div>
 
     <form v-if="config" @submit.prevent="onSave" class="settings-form">
@@ -44,12 +61,29 @@
         {{ saving ? "保存中..." : "保存" }}
       </button>
     </form>
+
+    <div v-if="passwordSet" class="password-change">
+      <h2>修改密码</h2>
+      <form @submit.prevent="onChangePassword">
+        <label class="field">
+          当前密码
+          <input name="current-password" type="password" v-model="currentPassword" required />
+        </label>
+        <label class="field">
+          新密码
+          <input name="new-password" type="password" v-model="newPassword" required />
+        </label>
+        <button type="submit" :disabled="saving">修改</button>
+      </form>
+      <div v-if="passwordChanged" class="success-banner">密码已修改</div>
+    </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { getConfig, updateConfig } from "@/api/materials";
+import { getConfig, updateConfig, getAuthStatus, authSetup, authLogin, setToken, getToken, authChangePassword } from "@/api/materials";
 import type { AppConfig } from "@/api/materials";
 
 const config = ref<AppConfig | null>(null);
@@ -57,6 +91,12 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const saved = ref(false);
+const passwordSet = ref(false);
+const authenticated = ref(false);
+const authPassword = ref("");
+const currentPassword = ref("");
+const newPassword = ref("");
+const passwordChanged = ref(false);
 
 async function refresh() {
   try {
@@ -70,7 +110,54 @@ async function refresh() {
   }
 }
 
-onMounted(refresh);
+onMounted(async () => {
+  const existingToken = getToken();
+  if (existingToken) {
+    authenticated.value = true;
+  }
+  const status = await getAuthStatus();
+  passwordSet.value = status.passwordSet;
+  if (authenticated.value) {
+    await refresh();
+  }
+});
+
+async function onAuthSubmit() {
+  if (!authPassword.value) return;
+  try {
+    error.value = "";
+    let result: { token: string };
+    if (passwordSet.value) {
+      result = await authLogin(authPassword.value);
+    } else {
+      result = await authSetup(authPassword.value);
+    }
+    setToken(result.token);
+    authenticated.value = true;
+    authPassword.value = "";
+    await refresh();
+  } catch (e) {
+    error.value = "认证失败：" + (e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function onChangePassword() {
+  if (!currentPassword.value || !newPassword.value) return;
+  try {
+    saving.value = true;
+    error.value = "";
+    passwordChanged.value = false;
+    await authChangePassword(currentPassword.value, newPassword.value);
+    passwordChanged.value = true;
+    currentPassword.value = "";
+    newPassword.value = "";
+    setTimeout(() => { passwordChanged.value = false; }, 2000);
+  } catch (e) {
+    error.value = "修改密码失败：" + (e instanceof Error ? e.message : String(e));
+  } finally {
+    saving.value = false;
+  }
+}
 
 async function onSave() {
   if (!config.value) return;
@@ -172,5 +259,42 @@ button[type="submit"]:disabled {
 .loading {
   text-align: center;
   color: #888;
+}
+
+.auth-form-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 0;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 280px;
+}
+
+.auth-form label {
+  font-size: 1.1rem;
+  font-weight: bold;
+  text-align: center;
+}
+
+.auth-form input {
+  padding: 0.5rem;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 1rem;
+}
+
+.auth-form button {
+  padding: 0.5rem 1rem;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #93c5fd;
+  cursor: pointer;
 }
 </style>

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 import json
@@ -94,6 +96,73 @@ def _save_progress(data: dict) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# ── Auth ──────────────────────────────────────────────
+_valid_tokens: set[str] = set()
+
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
+def _is_password_set() -> bool:
+    config = _load_config()
+    return bool(config.get("adminPasswordHash"))
+
+
+def _clear_tokens() -> None:
+    """Reset tokens (for testing)."""
+    global _valid_tokens
+    _valid_tokens = set()
+
+
+class PasswordBody(BaseModel):
+    password: str
+
+
+class LoginBody(BaseModel):
+    password: str
+
+
+# Protected paths that require auth.
+_PROTECTED_PREFIXES = (
+    ("POST", "/api/materials"),
+    ("PUT", "/api/materials/"),
+    ("DELETE", "/api/materials/"),
+    ("POST", "/api/split-preview"),
+    ("POST", "/api/fetch/"),
+    ("PUT", "/api/progress/"),
+    ("DELETE", "/api/progress/"),
+    ("PUT", "/api/config"),
+    ("PUT", "/api/auth/password"),
+)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    from starlette.responses import JSONResponse
+
+    path = request.url.path
+    method = request.method
+
+    if not _is_password_set():
+        return await call_next(request)
+
+    for prot_method, prefix in _PROTECTED_PREFIXES:
+        if method == prot_method and path.startswith(prefix):
+            break
+    else:
+        return await call_next(request)
+
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    token = auth[7:]
+    if token not in _valid_tokens:
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+
+    return await call_next(request)
+
+
 class MaterialCreate(BaseModel):
     title: str
     tags: str  # comma-separated
@@ -141,6 +210,67 @@ LENGTH_MAP = {
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Auth endpoints ────────────────────────────────────
+
+
+@app.get("/api/auth/status")
+def auth_status():
+    return {"passwordSet": _is_password_set()}
+
+
+@app.post("/api/auth/setup")
+def auth_setup(payload: PasswordBody):
+    if _is_password_set():
+        raise HTTPException(status_code=409, detail="Password already set")
+    salt = secrets.token_hex(16)
+    h = _hash_password(payload.password, salt)
+    config = _load_config()
+    config["adminPasswordHash"] = h
+    config["adminPasswordSalt"] = salt
+    _save_config(config)
+    token = secrets.token_hex(32)
+    _valid_tokens.add(token)
+    return {"token": token}
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: LoginBody):
+    if not _is_password_set():
+        raise HTTPException(status_code=403, detail="No password set")
+    config = _load_config()
+    salt = config.get("adminPasswordSalt", "")
+    expected = config.get("adminPasswordHash", "")
+    h = _hash_password(payload.password, salt)
+    if h != expected:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    token = secrets.token_hex(32)
+    _valid_tokens.add(token)
+    return {"token": token}
+
+
+class PasswordChangeBody(BaseModel):
+    currentPassword: str
+    newPassword: str
+
+
+@app.put("/api/auth/password")
+def auth_change_password(payload: PasswordChangeBody):
+    if not _is_password_set():
+        raise HTTPException(status_code=403, detail="No password set")
+    config = _load_config()
+    salt = config.get("adminPasswordSalt", "")
+    expected = config.get("adminPasswordHash", "")
+    h = _hash_password(payload.currentPassword, salt)
+    if h != expected:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    new_salt = secrets.token_hex(16)
+    new_h = _hash_password(payload.newPassword, new_salt)
+    config["adminPasswordHash"] = new_h
+    config["adminPasswordSalt"] = new_salt
+    _save_config(config)
+    return {"ok": True}
 
 
 @app.get("/api/config")

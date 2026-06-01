@@ -5,6 +5,22 @@
     <!-- Error banner -->
     <div v-if="error" class="error-banner">{{ error }}</div>
 
+    <!-- Auth gate -->
+    <div v-if="!authenticated" class="auth-form-wrapper">
+      <form class="auth-form" @submit.prevent="onAuthSubmit">
+        <label>{{ passwordSet ? "输入密码" : "设置密码" }}</label>
+        <input
+          name="auth-password"
+          type="password"
+          v-model="authPassword"
+          :placeholder="passwordSet ? '密码' : '设置管理密码'"
+          required
+        />
+        <button type="submit">{{ passwordSet ? "确认" : "设置" }}</button>
+      </form>
+    </div>
+
+    <template v-if="authenticated">
     <!-- Detail view -->
     <div v-if="detailMaterial && !editingMaterial" class="detail-view">
       <button class="btn-back" @click="detailMaterial = null">← 返回列表</button>
@@ -155,6 +171,7 @@
         <button class="btn-discard-preview" @click="previewMaterial = null">丢弃</button>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -168,6 +185,11 @@ import {
   fetchUrl,
   fetchTopic,
   previewSegments as previewSplit,
+  getAuthStatus,
+  authSetup,
+  authLogin,
+  setToken,
+  getToken,
 } from "@/api/materials";
 import type { Material, Segment } from "@/api/materials";
 
@@ -197,6 +219,9 @@ const topicMin = ref<number | undefined>(undefined);
 const topicMax = ref<number | undefined>(undefined);
 const previewMaterial = ref<Material | null>(null);
 const previewForm = reactive({ title: "", tags: "" });
+const passwordSet = ref(false);
+const authenticated = ref(false);
+const authPassword = ref("");
 
 async function refresh() {
   try {
@@ -207,7 +232,36 @@ async function refresh() {
   }
 }
 
-onMounted(refresh);
+onMounted(async () => {
+  const existingToken = getToken();
+  if (existingToken) {
+    authenticated.value = true;
+  }
+  const status = await getAuthStatus();
+  passwordSet.value = status.passwordSet;
+  if (authenticated.value) {
+    await refresh();
+  }
+});
+
+async function onAuthSubmit() {
+  if (!authPassword.value) return;
+  try {
+    error.value = "";
+    let result: { token: string };
+    if (passwordSet.value) {
+      result = await authLogin(authPassword.value);
+    } else {
+      result = await authSetup(authPassword.value);
+    }
+    setToken(result.token);
+    authenticated.value = true;
+    authPassword.value = "";
+    await refresh();
+  } catch (e) {
+    error.value = "认证失败：" + (e instanceof Error ? e.message : String(e));
+  }
+}
 
 function onView(mat: Material) {
   detailMaterial.value = mat;
@@ -689,5 +743,42 @@ form input, form textarea {
   color: #999;
   line-height: 1.6;
   white-space: pre-line;
+}
+
+.auth-form-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 0;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 280px;
+}
+
+.auth-form label {
+  font-size: 1.1rem;
+  font-weight: bold;
+  text-align: center;
+}
+
+.auth-form input {
+  padding: 0.5rem;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 1rem;
+}
+
+.auth-form button {
+  padding: 0.5rem 1rem;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #93c5fd;
+  cursor: pointer;
 }
 </style>

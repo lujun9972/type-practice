@@ -14,9 +14,15 @@ vi.mock("@/api/materials", () => ({
   updateMaterial: vi.fn(),
   fetchUrl: vi.fn(),
   fetchTopic: vi.fn(),
+  getAuthStatus: vi.fn(() => Promise.resolve({ passwordSet: true })),
+  authSetup: vi.fn(),
+  authLogin: vi.fn(),
+  setToken: vi.fn(),
+  clearToken: vi.fn(),
+  getToken: vi.fn(() => "existing-token"),
 }));
 
-import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic } from "@/api/materials";
+import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic, getAuthStatus, authSetup, authLogin, setToken, getToken } from "@/api/materials";
 
 const MOCK_MATERIALS: Material[] = [
   {
@@ -407,5 +413,60 @@ describe("AdminPage — AI generate preview & save", () => {
     await flushPromises();
 
     expect(createMaterial).toHaveBeenCalled();
+  });
+});
+
+describe("AdminPage — auth gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getToken).mockReturnValue(null);
+  });
+
+  it("shows password setup form when no password is set", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValue({ passwordSet: false });
+    const wrapper = await mountAdmin();
+
+    expect(wrapper.find(".auth-form").exists()).toBe(true);
+    expect(wrapper.find(".auth-form").text()).toContain("设置密码");
+  });
+
+  it("shows login form when password is set but not authenticated", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValue({ passwordSet: true });
+    const wrapper = await mountAdmin();
+
+    expect(wrapper.find(".auth-form").exists()).toBe(true);
+    expect(wrapper.find(".auth-form").text()).toContain("输入密码");
+  });
+
+  it("setup password and shows admin content", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValueOnce({ passwordSet: false });
+    vi.mocked(authSetup).mockResolvedValue({ token: "test-token" });
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find('input[name="auth-password"]').setValue("mypassword");
+    await wrapper.find(".auth-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(authSetup).toHaveBeenCalledWith("mypassword");
+    expect(setToken).toHaveBeenCalledWith("test-token");
+    expect(wrapper.find(".material-item").exists()).toBe(true);
+  });
+
+  it("login with correct password shows admin content", async () => {
+    vi.mocked(getAuthStatus).mockResolvedValueOnce({ passwordSet: true });
+    vi.mocked(authLogin).mockResolvedValue({ token: "test-token" });
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find('input[name="auth-password"]').setValue("mypassword");
+    await wrapper.find(".auth-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(authLogin).toHaveBeenCalledWith("mypassword");
+    expect(setToken).toHaveBeenCalledWith("test-token");
+    expect(wrapper.find(".material-item").exists()).toBe(true);
   });
 });

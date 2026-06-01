@@ -1,5 +1,10 @@
 const API_BASE = "/api";
 
+function authHeader(): Record<string, string> {
+  const token = sessionStorage.getItem("auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export interface Segment {
   type: string;
   content?: string;
@@ -34,7 +39,7 @@ export async function createMaterial(data: {
 }): Promise<Material> {
   const res = await fetch(`${API_BASE}/materials`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(data),
   });
   return res.json();
@@ -46,20 +51,23 @@ export async function updateMaterial(
 ): Promise<Material> {
   const res = await fetch(`${API_BASE}/materials/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(data),
   });
   return res.json();
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
-  await fetch(`${API_BASE}/materials/${id}`, { method: "DELETE" });
+  await fetch(`${API_BASE}/materials/${id}`, {
+    method: "DELETE",
+    headers: authHeader(),
+  });
 }
 
 export async function previewSegments(content: string): Promise<Segment[]> {
   const res = await fetch(`${API_BASE}/split-preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify({ title: "", tags: "", content }),
   });
   const data = await res.json();
@@ -69,7 +77,7 @@ export async function previewSegments(content: string): Promise<Segment[]> {
 export async function fetchUrl(url: string): Promise<Material> {
   const res = await fetch(`${API_BASE}/fetch/url`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify({ url }),
   });
   if (!res.ok) {
@@ -101,7 +109,7 @@ export async function fetchTopic(
   }
   const res = await fetch(`${API_BASE}/fetch/topic`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -160,12 +168,75 @@ export async function getProgress(materialId: string): Promise<Progress | null> 
 export async function saveProgress(progress: Progress): Promise<Progress> {
   const res = await fetch(`${API_BASE}/progress/${progress.materialId}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(progress),
   });
   return res.json();
 }
 
 export async function deleteProgress(materialId: string): Promise<void> {
-  await fetch(`${API_BASE}/progress/${materialId}`, { method: "DELETE" });
+  await fetch(`${API_BASE}/progress/${materialId}`, {
+    method: "DELETE",
+    headers: authHeader(),
+  });
+}
+
+// ── Auth ──────────────────────────────────────────────
+
+export async function getAuthStatus(): Promise<{ passwordSet: boolean }> {
+  const res = await fetch(`${API_BASE}/auth/status`);
+  return res.json();
+}
+
+export async function authSetup(password: string): Promise<{ token: string }> {
+  const res = await fetch(`${API_BASE}/auth/setup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Setup failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function authLogin(password: string): Promise<{ token: string }> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Login failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export function setToken(token: string): void {
+  sessionStorage.setItem("auth_token", token);
+}
+
+export function clearToken(): void {
+  sessionStorage.removeItem("auth_token");
+}
+
+export function getToken(): string | null {
+  return sessionStorage.getItem("auth_token");
+}
+
+export async function authChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Password change failed (${res.status})`);
+  }
 }
