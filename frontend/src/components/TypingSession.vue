@@ -51,7 +51,7 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   complete: [];
-  "segment-complete": [result: { index: number; accuracy: number; timeMs: number }];
+  "segment-complete": [result: { index: number; accuracy: number; timeMs: number; correctChars: number }];
 }>();
 
 const unlockedTextIndex = ref(props.startIndex);
@@ -110,7 +110,7 @@ function onSegmentComplete(textIndex: number) {
     const chars = props.mode === "pinyin" ? seg.pinyinEngine.chars : seg.engine.chars;
     const correct = chars.filter((c: { status: string }) => c.status === "correct").length;
     const accuracy = chars.length > 0 ? Math.round((correct / chars.length) * 100) : 0;
-    emit("segment-complete", { index: textIndex, accuracy, timeMs: Date.now() - startTime.value });
+    emit("segment-complete", { index: textIndex, accuracy, timeMs: Date.now() - startTime.value, correctChars: correct });
   }
 
   const nextUnlocked = unlockedTextIndex.value + 1;

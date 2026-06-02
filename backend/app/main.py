@@ -15,6 +15,7 @@ import json
 
 from app.extractor import extract_content
 from app.splitter import split_into_segments
+from app.stats import StatsStore
 from app.store import MaterialStore
 
 app = FastAPI()
@@ -24,6 +25,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _store: MaterialStore | None = None
 _config_path: Path | None = None
 _progress_path: Path | None = None
+_stats_store: StatsStore | None = None
 
 CONFIG_DEFAULTS = {
     "skipPunctuation": True,
@@ -76,6 +78,18 @@ def _save_config(config: dict) -> None:
 def _set_progress_path(path: Path) -> None:
     global _progress_path
     _progress_path = path
+
+
+def _get_stats_store() -> StatsStore:
+    global _stats_store
+    if _stats_store is None:
+        _stats_store = StatsStore(DATA_DIR / "stats.json")
+    return _stats_store
+
+
+def _set_stats_store(store: StatsStore) -> None:
+    global _stats_store
+    _stats_store = store
 
 
 def _get_progress_path() -> Path:
@@ -367,6 +381,17 @@ def get_progress(material_id: str):
 def save_progress(material_id: str, payload: dict):
     progress = _load_progress()
     payload["materialId"] = material_id
+
+    # Award XP from newly completed segments
+    old_results = progress.get(material_id, {}).get("segmentResults", [])
+    new_results = payload.get("segmentResults", [])
+    old_indices = {r["index"] for r in old_results}
+    for result in new_results:
+        if result["index"] not in old_indices:
+            xp = result.get("correctChars", 0)
+            if xp > 0:
+                _get_stats_store().add_xp(xp)
+
     progress[material_id] = payload
     _save_progress(progress)
     return payload
@@ -461,3 +486,35 @@ def fetch_topic(payload: TopicFetch):
         "content": text,
         "segments": segments,
     }
+
+
+# ── Stats endpoints ────────────────────────────────────
+
+
+class DailyGoalBody(BaseModel):
+    difficulty: Literal["easy", "normal", "challenge"]
+    date: Optional[str] = None
+
+
+class RepairBody(BaseModel):
+    date: str
+
+
+@app.get("/api/stats")
+def get_stats():
+    return _get_stats_store().get_stats()
+
+
+@app.post("/api/stats/daily-goal")
+def set_daily_goal(payload: DailyGoalBody):
+    store = _get_stats_store()
+    store.set_daily_goal(payload.difficulty, date=payload.date)
+    return store.get_stats()
+
+
+@app.post("/api/stats/repair")
+def use_repair(payload: RepairBody):
+    store = _get_stats_store()
+    if not store.use_repair(payload.date):
+        raise HTTPException(status_code=400, detail="No repair items available")
+    return store.get_stats()

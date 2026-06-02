@@ -1,7 +1,8 @@
 <template>
   <div class="app">
     <nav class="nav-bar">
-      <router-link to="/">练习</router-link>
+      <router-link to="/">主页</router-link>
+      <router-link to="/play">练习</router-link>
       <router-link to="/admin">管理</router-link>
       <router-link to="/settings">设置</router-link>
     </nav>

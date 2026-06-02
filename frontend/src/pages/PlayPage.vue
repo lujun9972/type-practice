@@ -95,8 +95,9 @@
     </div>
 
     <!-- Typing session -->
-    <div v-else>
+    <div v-else-if="!showCompletion" class="session-area">
       <button class="btn-back" @click="onBack">← 返回</button>
+      <div v-if="xpPopup" class="xp-popup">+{{ xpPopup }} XP</div>
       <TypingSession
         :segments="activeMaterial.segments"
         :start-index="startIndex"
@@ -104,6 +105,16 @@
         @complete="onComplete"
         @segment-complete="onSegmentComplete"
       />
+    </div>
+
+    <!-- Completion screen -->
+    <div v-else class="completion-screen">
+      <h2>全部完成！</h2>
+      <div class="xp-earned">
+        <span class="xp-icon">⭐</span>
+        <span class="xp-amount">+{{ totalXpEarned }} XP</span>
+      </div>
+      <button class="btn-home" @click="$router.push('/')">返回主页</button>
     </div>
   </div>
 </template>
@@ -131,7 +142,13 @@ const error = ref("");
 const savedProgress = ref<Progress | null>(null);
 const showPrompt = ref(false);
 const completedSegments = ref<number[]>([]);
-const segmentResults = ref<{ index: number; accuracy: number; timeMs: number }[]>([]);
+const segmentResults = ref<{ index: number; accuracy: number; timeMs: number; correctChars: number }[]>([]);
+const xpPopup = ref(0);
+const showCompletion = ref(false);
+
+const totalXpEarned = computed(() =>
+  segmentResults.value.reduce((sum, r) => sum + r.correctChars, 0),
+);
 
 const filteredMaterials = computed(() => {
   if (!activeTag.value) return materials.value;
@@ -242,13 +259,15 @@ function onBack() {
   activeMaterial.value = null;
   savedProgress.value = null;
   showPrompt.value = false;
+  showCompletion.value = false;
+  xpPopup.value = 0;
 }
 
 function onComplete() {
-  alert("全部完成！");
+  showCompletion.value = true;
 }
 
-async function onSegmentComplete(result: { index: number; accuracy: number; timeMs: number }) {
+async function onSegmentComplete(result: { index: number; accuracy: number; timeMs: number; correctChars: number }) {
   if (!activeMaterial.value) return;
   completedSegments.value.push(result.index);
   segmentResults.value.push(result);
@@ -265,6 +284,9 @@ async function onSegmentComplete(result: { index: number; accuracy: number; time
 
   try {
     await saveProgress(progress);
+    // Show per-segment XP popup
+    xpPopup.value = result.correctChars;
+    setTimeout(() => { xpPopup.value = 0; }, 1500);
   } catch { /* ignore save failures */ }
 }
 </script>
@@ -456,5 +478,70 @@ h1 {
 .length-sep {
   color: #888;
   line-height: 2;
+}
+
+.session-area {
+  position: relative;
+}
+
+.xp-popup {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: bold;
+  padding: 0.5rem 1.5rem;
+  border-radius: 12px;
+  animation: xp-float 1.5s ease-out forwards;
+  z-index: 100;
+  pointer-events: none;
+}
+
+@keyframes xp-float {
+  0% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-60px); }
+}
+
+.completion-screen {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.completion-screen h2 {
+  color: #22c55e;
+  font-size: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.xp-earned {
+  margin-bottom: 2rem;
+}
+
+.xp-icon {
+  font-size: 2rem;
+}
+
+.xp-amount {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #fbbf24;
+  margin-left: 0.5rem;
+}
+
+.btn-home {
+  padding: 0.8rem 2rem;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.btn-home:hover {
+  opacity: 0.9;
 }
 </style>

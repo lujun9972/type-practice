@@ -169,6 +169,18 @@ describe("TypingSession — segment-complete event", () => {
     expect(events!.length).toBe(1);
     expect(events![0][0]).toMatchObject({ index: 0 });
   });
+
+  it("emits segment-complete with correctChars for XP awarding", async () => {
+    const wrapper = mount(TypingSession, {
+      props: { segments: [{ type: "text", content: "你好世界" }] },
+    });
+    await completeSegment(wrapper, 0);
+    const events = wrapper.emitted("segment-complete");
+    expect(events).toBeTruthy();
+    const payload = events![0][0] as Record<string, unknown>;
+    expect(payload).toHaveProperty("correctChars");
+    expect(typeof payload.correctChars).toBe("number");
+  });
 });
 
 describe("TypingSession — startIndex", () => {

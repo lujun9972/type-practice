@@ -236,7 +236,7 @@ describe("PlayPage — progress prompt", () => {
       materialId: "mat1",
       currentSegmentIndex: 1,
       completedSegments: [0],
-      segmentResults: [{ index: 0, accuracy: 95, timeMs: 3000 }],
+      segmentResults: [{ index: 0, accuracy: 95, timeMs: 3000, correctChars: 8 }],
       isComplete: false,
     });
 
@@ -276,7 +276,7 @@ describe("PlayPage — progress save", () => {
       materialId: "mat1",
       currentSegmentIndex: 1,
       completedSegments: [0],
-      segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000 }],
+      segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000, correctChars: 8 }],
       isComplete: false,
     });
 
@@ -286,14 +286,14 @@ describe("PlayPage — progress save", () => {
     await flushPromises();
 
     const session = wrapper.findComponent({ name: "TypingSession" });
-    session.vm.$emit("segment-complete", { index: 0, accuracy: 95, timeMs: 1000 });
+    session.vm.$emit("segment-complete", { index: 0, accuracy: 95, timeMs: 1000, correctChars: 8 });
     await flushPromises();
 
     expect(saveProgress).toHaveBeenCalledWith(
       expect.objectContaining({
         materialId: "mat1",
         completedSegments: [0],
-        segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000 }],
+        segmentResults: [{ index: 0, accuracy: 95, timeMs: 1000, correctChars: 8 }],
       }),
     );
   });
