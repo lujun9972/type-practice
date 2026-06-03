@@ -10,6 +10,8 @@ export interface Segment {
   content?: string;
   url?: string;
   position?: number;
+  startTimeMs?: number;
+  endTimeMs?: number;
 }
 
 export interface Material {
@@ -18,6 +20,7 @@ export interface Material {
   tags: string[];
   content: string;
   segments: Segment[];
+  videoUrl?: string;
 }
 
 export async function listMaterials(tag?: string): Promise<Material[]> {

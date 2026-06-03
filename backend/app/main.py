@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 import json
@@ -17,6 +17,7 @@ from app.extractor import extract_content
 from app.splitter import split_into_segments
 from app.stats import StatsStore
 from app.store import MaterialStore
+from app.subtitle_parser import parse_subtitle
 
 app = FastAPI()
 
@@ -26,6 +27,7 @@ _store: MaterialStore | None = None
 _config_path: Path | None = None
 _progress_path: Path | None = None
 _stats_store: StatsStore | None = None
+_video_dir: Path | None = None
 
 CONFIG_DEFAULTS = {
     "skipPunctuation": True,
@@ -78,6 +80,20 @@ def _save_config(config: dict) -> None:
 def _set_progress_path(path: Path) -> None:
     global _progress_path
     _progress_path = path
+
+
+def _get_video_dir() -> Path:
+    global _video_dir
+    if _video_dir is None:
+        _video_dir = DATA_DIR / "videos"
+    _video_dir.mkdir(parents=True, exist_ok=True)
+    return _video_dir
+
+
+def _set_video_dir(path: Path) -> None:
+    global _video_dir
+    _video_dir = path
+    _video_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _get_stats_store() -> StatsStore:
@@ -270,14 +286,19 @@ def export_materials(payload: ExportRequest):
         materials = [m for m in materials if m["id"] in id_set]
 
     # Export without segments — they'll be re-derived on import.
+    # Exception: video materials keep their segments (with timestamps) and videoUrl.
     export_items = []
     for m in materials:
-        export_items.append({
+        item = {
             "id": m["id"],
             "title": m["title"],
             "tags": m.get("tags", []),
             "content": m.get("content", ""),
-        })
+        }
+        if m.get("videoUrl"):
+            item["videoUrl"] = m["videoUrl"]
+            item["segments"] = m.get("segments", [])
+        export_items.append(item)
 
     return {
         "version": 1,
@@ -411,7 +432,9 @@ def import_resolve(payload: ImportResolveRequest):
                 local_mat["title"] = m["title"]
                 local_mat["tags"] = m.get("tags", [])
                 local_mat["content"] = m["content"]
-                local_mat["segments"] = split_into_segments(m["content"])
+                local_mat["segments"] = m.get("segments", split_into_segments(m["content"]))
+                if m.get("videoUrl"):
+                    local_mat["videoUrl"] = m["videoUrl"]
                 store.save(local_mat)
                 updated_count += 1
             elif action == "keep_both":
@@ -421,8 +444,10 @@ def import_resolve(payload: ImportResolveRequest):
                     "title": m["title"],
                     "tags": m.get("tags", []),
                     "content": m["content"],
-                    "segments": split_into_segments(m["content"]),
+                    "segments": m.get("segments", split_into_segments(m["content"])),
                 }
+                if m.get("videoUrl"):
+                    new_mat["videoUrl"] = m["videoUrl"]
                 store.save(new_mat)
                 imported_count += 1
         else:
@@ -436,8 +461,10 @@ def import_resolve(payload: ImportResolveRequest):
                 "title": m["title"],
                 "tags": m.get("tags", []),
                 "content": m["content"],
-                "segments": split_into_segments(m["content"]),
+                "segments": m.get("segments", split_into_segments(m["content"])),
             }
+            if m.get("videoUrl"):
+                new_mat["videoUrl"] = m["videoUrl"]
             store.save(new_mat)
             imported_count += 1
 
@@ -589,8 +616,92 @@ def update_material(material_id: str, payload: MaterialCreate):
 @app.delete("/api/materials/{material_id}", status_code=204)
 def delete_material(material_id: str):
     store = _get_store()
-    if not store.delete(material_id):
+    material = store.get(material_id)
+    if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    if material.get("videoUrl"):
+        video_path = _get_video_dir() / material["videoUrl"]
+        if video_path.exists():
+            video_path.unlink()
+    store.delete(material_id)
+
+
+@app.post("/api/materials/video", status_code=201)
+def create_video_material(
+    video: UploadFile = File(...),
+    subtitle: UploadFile = File(...),
+    title: str = Form(""),
+    tags: str = Form(""),
+    overwrite: bool = Query(False),
+):
+    video_dir = _get_video_dir()
+    filename = video.filename or "video.mp4"
+    target_path = video_dir / filename
+
+    if target_path.exists() and not overwrite:
+        raise HTTPException(status_code=409, detail=f"文件 {filename} 已存在")
+
+    target_path.write_bytes(video.file.read())
+
+    subtitle_bytes = subtitle.file.read()
+    try:
+        subtitle_filename = subtitle.filename or "subtitle.srt"
+        entries = parse_subtitle(subtitle_bytes, subtitle_filename)
+    except ValueError as e:
+        if target_path.exists() and not (target_path.exists() and overwrite):
+            target_path.unlink()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    segments = [
+        {
+            "type": "text",
+            "content": entry["content"],
+            "startTimeMs": entry["startTimeMs"],
+            "endTimeMs": entry["endTimeMs"],
+        }
+        for entry in entries
+    ]
+
+    material = {
+        "id": uuid.uuid4().hex[:12],
+        "title": title,
+        "tags": [t.strip() for t in tags.split(",") if t.strip()],
+        "content": " ".join(e["content"] for e in entries),
+        "segments": segments,
+        "videoUrl": filename,
+    }
+
+    store = _get_store()
+    store.save(material)
+    return material
+
+
+@app.get("/api/videos/{filename}")
+def serve_video(filename: str):
+    video_path = _get_video_dir() / filename
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    from fastapi.responses import FileResponse
+
+    return FileResponse(video_path)
+
+
+@app.post("/api/materials/{material_id}/video")
+def attach_video(material_id: str, video: UploadFile = File(...)):
+    """Attach a video file to an existing material (re-upload after import)."""
+    store = _get_store()
+    mat = store.get(material_id)
+    if not mat:
+        raise HTTPException(status_code=404, detail="Material not found")
+
+    video_dir = _get_video_dir()
+    filename = video.filename or "video.mp4"
+    target_path = video_dir / filename
+    target_path.write_bytes(video.file.read())
+
+    mat["videoUrl"] = filename
+    store.save(mat)
+    return mat
 
 
 @app.get("/api/progress/{material_id}")

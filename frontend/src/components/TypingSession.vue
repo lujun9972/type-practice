@@ -1,20 +1,31 @@
 <template>
   <div class="typing-session">
-    <!-- Visible nodes: text segments and images up to current unlock point -->
-    <template v-for="(node, i) in visibleNodes" :key="i">
-      <div v-if="node.type === 'text'" class="segment-wrapper">
-        <TypingSegment
-          ref="segmentRefs"
-          :text="node.content"
-          :mode="mode"
-          @complete="onSegmentComplete(textIndexOf(node))"
-        />
-      </div>
-      <div v-else-if="node.type === 'image'" class="image-wrapper">
-        <img :src="node.url" alt="" />
-      </div>
+    <VideoPlayer
+      v-if="videoUrl"
+      ref="videoPlayerRef"
+      :videoUrl="videoSrc"
+      :startTimeMs="currentStartTimeMs"
+      :nextStartTimeMs="currentNextStartTimeMs"
+      @buffered="onVideoBuffered"
+      @segmentPlaybackComplete="onSegmentPlaybackComplete"
+    />
+    <div v-if="videoUrl && videoBuffering" class="video-buffering">视频加载中...</div>
+    <template v-if="!videoUrl || !videoBuffering">
+      <template v-for="(node, i) in visibleNodes" :key="i">
+        <div v-if="node.type === 'text'" class="segment-wrapper">
+          <TypingSegment
+            ref="segmentRefs"
+            :text="node.content"
+            :mode="mode"
+            @complete="onSegmentComplete(textIndexOf(node))"
+          />
+        </div>
+        <div v-else-if="node.type === 'image'" class="image-wrapper">
+          <img :src="node.url" alt="" />
+        </div>
+      </template>
     </template>
-    <div v-if="!isFinished" class="controls">
+    <div v-if="!isFinished && (!videoUrl || !videoBuffering)" class="controls">
       <button class="btn-hint" @click="onHint">Hint</button>
       <button
         class="btn-skip"
@@ -37,17 +48,20 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import TypingSegment from "./TypingSegment.vue";
+import VideoPlayer from "./VideoPlayer.vue";
 import { pinyin as getPinyin } from "pinyin-pro";
 
 interface Segment {
   type: string;
   content?: string;
   url?: string;
+  startTimeMs?: number;
+  endTimeMs?: number;
 }
 
 const props = withDefaults(
-  defineProps<{ segments: Segment[]; skipLimit?: number; startIndex?: number; mode?: "typing" | "pinyin" }>(),
-  { skipLimit: 3, startIndex: 0, mode: "typing" },
+  defineProps<{ segments: Segment[]; skipLimit?: number; startIndex?: number; mode?: "typing" | "pinyin"; videoUrl?: string }>(),
+  { skipLimit: 3, startIndex: 0, mode: "typing", videoUrl: "" },
 );
 const emit = defineEmits<{
   complete: [];
@@ -59,10 +73,18 @@ const skipRemaining = ref(props.skipLimit);
 const hintText = ref("");
 const isFinished = ref(false);
 const startTime = ref(Date.now());
+const videoBuffering = ref(true);
+const videoPlayerRef = ref<InstanceType<typeof VideoPlayer> | null>(null);
+const pendingPlayback = ref<number | null>(null);
+
+const videoSrc = computed(() => props.videoUrl ? `/api/videos/${props.videoUrl}` : "");
 
 const textSegments = computed(() =>
   props.segments.filter((s) => s.type === "text"),
 );
+
+const currentStartTimeMs = ref<number | null>(null);
+const currentNextStartTimeMs = ref<number | null>(null);
 
 /**
  * Visible nodes = all segments (text + image) up to and including
@@ -104,7 +126,6 @@ function activeSegment(): InstanceType<typeof TypingSegment> | undefined {
 function onSegmentComplete(textIndex: number) {
   if (textIndex !== unlockedTextIndex.value) return;
 
-  // Emit per-segment result.
   const seg = segmentRefs.value[textIndex];
   if (seg) {
     const chars = props.mode === "pinyin" ? seg.pinyinEngine.chars : seg.engine.chars;
@@ -112,6 +133,8 @@ function onSegmentComplete(textIndex: number) {
     const accuracy = chars.length > 0 ? Math.round((correct / chars.length) * 100) : 0;
     emit("segment-complete", { index: textIndex, accuracy, timeMs: Date.now() - startTime.value, correctChars: correct });
   }
+
+  triggerVideoPlayback(textIndex);
 
   const nextUnlocked = unlockedTextIndex.value + 1;
 
@@ -121,6 +144,32 @@ function onSegmentComplete(textIndex: number) {
     isFinished.value = true;
     emit("complete");
   }
+}
+
+function triggerVideoPlayback(textIndex: number) {
+  if (!props.videoUrl) return;
+  const seg = textSegments.value[textIndex];
+  if (!seg || seg.startTimeMs === undefined) return;
+
+  const nextSeg = textSegments.value[textIndex + 1];
+  const nextStart = nextSeg?.startTimeMs ?? null;
+
+  currentStartTimeMs.value = seg.startTimeMs;
+  currentNextStartTimeMs.value = nextStart;
+}
+
+function onVideoBuffered() {
+  videoBuffering.value = false;
+  if (props.startIndex > 0) {
+    const seg = textSegments.value[props.startIndex];
+    if (seg?.startTimeMs !== undefined && videoPlayerRef.value) {
+      videoPlayerRef.value.seekTo(seg.startTimeMs);
+    }
+  }
+}
+
+function onSegmentPlaybackComplete() {
+  // Video finished playing the current segment fragment; no action needed.
 }
 
 // Result calculations
@@ -243,5 +292,11 @@ function onSkip() {
 .result-overlay p {
   font-size: 1.2rem;
   margin: 0.5rem 0;
+}
+
+.video-buffering {
+  text-align: center;
+  padding: 2rem;
+  color: #aaa;
 }
 </style>

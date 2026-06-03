@@ -9,15 +9,19 @@
 _Avoid_: 行、段落、句子
 
 **Material**:
-一篇完整的打字练习素材，由多个 Segment 和可选的图片组成。来源包括素材库、URL 抓取和 LLM 生成。
+一篇完整的打字练习素材，由多个 Segment 和可选的图片组成。来源包括素材库、URL 抓取、LLM 生成和视频字幕。
 _Avoid_: 文章、内容、题目
+
+**Video Material**:
+一种特殊的 Material，由视频文件和字幕文件组成。字幕解析为带时间戳的 Segment，用户打字驱动视频逐句播放。在 Material Library 中与文本 Material 混合展示，共享同一套 Progress、XP 和导入导出机制。
+_Avoid_: 视频素材、视频模式
 
 **Material Library**:
 预置的 Material 集合，通过管理页面添加和维护。支持查看详情、编辑、URL 抓取和 AI 生成。
 _Avoid_: 题库、素材库（作为技术术语时）
 
 **Unlock**:
-用户打完当前 Segment 后，下一个 Segment（或图片）变为可见状态。图片作为解锁奖励出现。
+用户打完当前 Segment 后，下一个 Segment（或图片）变为可见状态。图片作为解锁奖励出现。在 Video Material 中，Unlock 同时触发视频播放当前字幕对应的片段。
 _Avoid_: 显示、展开
 
 **Hint**:
@@ -50,6 +54,15 @@ _Avoid_: 存档、记录
 - 重新开始清空该 Material 的所有旧 Progress
 - Material 内容被编辑（导致重新分段）时，关联 Progress 自动清空
 
+### Video Material 关系
+
+- **Video Material** 在管理页通过上传视频文件 + 字幕文件（SRT/VTT）创建
+- 字幕文件由后端解析为带时间戳的 **Segment**，并自动清洗格式标签
+- 用户打完一个 **Segment** 后，视频从该字幕开始时间播放到下一句字幕开始时间，然后暂停
+- 视频 Material 与文本 Material 共享同一套 **Progress**、**XP**、**Hint**、**Skip** 机制
+- 删除 Video Material 时同时删除磁盘上的视频文件
+- 导出时只导出字幕元数据，不包含视频文件；导入时需重新上传视频
+
 ## Example dialogue
 
 > **Dev:** "用户输入了一个 Minecraft 的 URL，抓取下来的内容有 5000 字和 20 张图片，怎么变成 Segment？"
@@ -72,3 +85,4 @@ _Avoid_: 存档、记录
 
 - "打字" 同时指中文输入和英文输入——已明确：两者都支持，中文仅比对最终输出汉字，不关心输入法按键序列。
 - "一行" 指视觉行还是内容段——已明确：不使用视觉行，使用 **Segment**（自然断点切分）。
+- Video Material 与文本 Material 是否是不同概念——已明确：是同一概念的不同来源，统一在 Material 模型下。

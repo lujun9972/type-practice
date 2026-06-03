@@ -144,6 +144,7 @@ describe("AdminPage — delete", () => {
   });
 
   it("delete button removes material from list", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     const mat: Material = {
       id: "del1",
       title: "待删除",

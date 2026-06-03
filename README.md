@@ -7,17 +7,19 @@
 ### 素材管理
 
 - **素材库** — 手动创建、URL 抓取、AI 生成三种方式添加素材，支持查看详情、编辑、删除
-- **素材导入导出** — 一键导出为 JSON 文件，支持全部/按标签/手动选择三种导出范围；导入时自动检测冲突，逐个选择保留本地、使用导入的或两个都保留
+- **视频素材** — 上传视频 + 字幕文件（SRT/VTT），自动解析为带时间戳的分段，边打字边看视频
+- **素材导入导出** — 一键导出为 JSON 文件，支持全部/按标签/手动选择三种导出范围；导入时自动检测冲突，逐个选择保留本地、使用导入的或两个都保留；视频素材导出包含字幕数据，导入后可重新上传视频文件
 - **唐诗300首** — 内置300首经典唐诗（白居易、李白、孟浩然、王勃等），开箱即练
 - **标签分类** — 按标签筛选素材，随机练习模式一键开始
 
 ### 打字练习
 
 - **分段打字** — 文章自动按句号分段，逐段解锁，图片在打完前置段落后显示
+- **视频分段播放** — 视频素材每打完一段字幕自动播放对应片段，暂停等待下一段
 - **拼音模式** — 切换到拼音输入模式，练习汉字拼音输入，支持声调显示和 IME 组合处理
 - **拼音提示** — 遇到不会读的汉字，点击 Hint 显示拼音（不限次数）
 - **随机练习** — 🎲 按钮从当前筛选结果中随机选一篇，增加练习多样性
-- **进度保存** — 关闭浏览器后再次打开，提示继续或重新开始
+- **进度保存** — 关闭浏览器后再次打开，提示继续或重新开始；视频素材恢复时自动定位到当前段落
 
 ### 内容获取
 
@@ -46,7 +48,8 @@
 |---|------|
 | Frontend | Vue 3 + TypeScript + Vite |
 | Backend | Python FastAPI + uvicorn |
-| Testing | Vitest (frontend, 128 tests) + pytest (backend, 114 tests) |
+| Testing | Vitest (frontend, 133 tests) + pytest (backend, 139 tests) |
+| Subtitle Parsing | 自研解析器（SRT + VTT，chardet 自动编码检测） |
 | Content Extraction | readability + custom extractor |
 | Pinyin | pinyin-pro |
 | LLM | DeepSeek / OpenAI-compatible API |
@@ -54,21 +57,26 @@
 ## Architecture
 
 ```
-┌─────────────────┐       ┌─────────────────────────────┐
-│   Browser SPA   │       │        FastAPI Server        │
-│   (Vue 3)       │──────▶│                              │
-│                 │ REST  │  ┌─────┐  ┌──────┐  ┌─────┐ │
-│  Pages:         │  API  │  │Store│  │Stats │  │LLM  │ │
-│  - Home         │◀──────│  │(JSON│  │Store │  │Proxy│ │
-│  - Play         │       │  │ File)│  │(JSON)│  │     │ │
-│  - Admin        │       │  └─────┘  └──────┘  └─────┘ │
-│  - Settings     │       │                              │
-│                 │       │  Auth Middleware (token)      │
-└─────────────────┘       └─────────────────────────────┘
+┌──────────────────────┐       ┌──────────────────────────────────┐
+│    Browser SPA       │       │         FastAPI Server           │
+│    (Vue 3)           │──────▶│                                  │
+│                      │ REST  │  ┌─────┐  ┌──────┐  ┌─────────┐ │
+│  Pages:              │  API  │  │Store│  │Stats │  │Subtitle │ │
+│  - Home              │◀──────│  │(JSON│  │Store │  │ Parser  │ │
+│  - Play              │       │  │ File)│  │(JSON)│  │(SRT/VTT)│ │
+│  - Admin             │       │  └─────┘  └──────┘  └─────────┘ │
+│  - Settings          │       │                                  │
+│                      │       │  ┌─────┐  ┌──────┐  ┌─────┐    │
+│  Components:         │       │  │Video│  │LLM  │  │Auth │    │
+│  - TypingSession     │       │  │Files│  │Proxy│  │MW   │    │
+│  - TypingSegment     │       │  └─────┘  └──────┘  └─────┘    │
+│  - VideoPlayer       │       │                                  │
+└──────────────────────┘       └──────────────────────────────────┘
 ```
 
 - **Frontend**: Vue 3 SPA，Vite 开发服务器代理 `/api` 到后端
 - **Backend**: FastAPI 单文件应用，JSON 文件持久化，无数据库依赖
+- **Video**: 视频文件存储在本地目录，字幕解析器自动检测编码（chardet + GBK/Big5/Latin-1 回退链）
 - **Auth**: 密码设置后生成 token，受保护端点通过中间件验证
 - **Production**: 后端直接 serve 前端 `dist/` 静态文件
 
@@ -79,16 +87,17 @@ type-practice/
 ├── frontend/                # Vue 3 SPA
 │   ├── src/
 │   │   ├── api/             # API client (materials, stats, config)
-│   │   ├── components/      # TypingSegment, TypingSession
+│   │   ├── components/      # TypingSegment, TypingSession, VideoPlayer
 │   │   ├── engine/          # TypingEngine + PinyinEngine
 │   │   └── pages/           # HomePage, PlayPage, AdminPage, SettingsPage
 │   └── tests/               # Vitest unit + component tests
 ├── backend/                 # FastAPI server
 │   ├── app/
-│   │   ├── main.py          # API endpoints + auth + import/export
+│   │   ├── main.py          # API endpoints + auth + import/export + video upload
 │   │   ├── stats.py         # Gamification data layer (XP, levels, streaks)
 │   │   ├── extractor.py     # URL content extraction
 │   │   ├── splitter/        # Text → segment splitting
+│   │   ├── subtitle_parser/ # SRT/VTT parser with encoding detection
 │   │   └── store.py         # JSON file persistence
 │   ├── data/
 │   │   └── tang300-export.json  # 唐诗300首导入文件
@@ -178,7 +187,7 @@ LLM_API_KEY=your-key-here npm run dev
 
 - **Admin 认证** — 管理页面密码保护，token 存储在服务端内存，重启后清空
 - **前端 token** — `sessionStorage` 存储，标签页关闭即失效
-- **受保护端点** — 所有写操作（创建/编辑/删除素材、导入导出、修改配置）均需有效 token
+- **受保护端点** — 所有写操作（创建/编辑/删除素材、导入导出、视频上传、修改配置）均需有效 token
 - **密码存储** — SHA-256 + salt，不明文存储
 
 ## Author

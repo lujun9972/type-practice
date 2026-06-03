@@ -103,6 +103,7 @@
         :segments="activeMaterial.segments"
         :start-index="startIndex"
         :mode="typingMode"
+        :videoUrl="activeMaterial.videoUrl || ''"
         @complete="onComplete"
         @segment-complete="onSegmentComplete"
       />
