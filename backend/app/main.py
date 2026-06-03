@@ -518,3 +518,11 @@ def use_repair(payload: RepairBody):
     if not store.use_repair(payload.date):
         raise HTTPException(status_code=400, detail="No repair items available")
     return store.get_stats()
+
+
+# Serve frontend static files in production (when dist/ exists)
+_STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _STATIC_DIR.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")

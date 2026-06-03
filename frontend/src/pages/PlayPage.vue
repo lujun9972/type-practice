@@ -65,6 +65,7 @@
         筛选：<span class="tag active" @click="clearFilter">{{ activeTag }} ✕</span>
       </div>
       <div v-if="error" class="error-banner">{{ error }}</div>
+      <button v-if="filteredMaterials.length > 0" class="btn-random" @click="onRandom">🎲 随机练习</button>
       <div class="material-cards">
         <div
           v-for="mat in filteredMaterials"
@@ -261,6 +262,13 @@ function onBack() {
   showPrompt.value = false;
   showCompletion.value = false;
   xpPopup.value = 0;
+}
+
+function onRandom() {
+  const pool = filteredMaterials.value;
+  if (pool.length === 0) return;
+  const mat = pool[Math.floor(Math.random() * pool.length)];
+  onSelect(mat);
 }
 
 function onComplete() {
@@ -542,6 +550,24 @@ h1 {
 }
 
 .btn-home:hover {
+  opacity: 0.9;
+}
+
+.btn-random {
+  display: block;
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.btn-random:hover {
   opacity: 0.9;
 }
 </style>

@@ -265,6 +265,79 @@ describe("PlayPage — progress prompt", () => {
   });
 });
 
+describe("PlayPage — random selection", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows random button when materials exist", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountPlay();
+
+    expect(wrapper.find(".btn-random").exists()).toBe(true);
+    expect(wrapper.find(".btn-random").text()).toContain("随机练习");
+  });
+
+  it("hides random button when no materials exist", async () => {
+    vi.mocked(listMaterials).mockResolvedValue([]);
+    const wrapper = await mountPlay();
+
+    expect(wrapper.find(".btn-random").exists()).toBe(false);
+  });
+
+  it("hides random button when tag filter excludes all materials", async () => {
+    // Two materials with different tags, filter to one, then check button
+    // still visible. The real test: button must use filteredMaterials, not materials.
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountPlay();
+
+    // Both materials visible, button visible
+    expect(wrapper.findAll(".material-card")).toHaveLength(2);
+    expect(wrapper.find(".btn-random").exists()).toBe(true);
+
+    // Filter to "科幻" — only "三体" matches, button still visible
+    const scifiTag = wrapper.findAll(".tag").find((t) => t.text() === "科幻");
+    await scifiTag!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".material-card")).toHaveLength(1);
+    expect(wrapper.find(".btn-random").exists()).toBe(true);
+  });
+
+  it("clicking random button starts a typing session", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(getProgress).mockResolvedValue(null);
+
+    const wrapper = await mountPlay();
+
+    await wrapper.find(".btn-random").trigger("click");
+    await flushPromises();
+
+    // Should have selected a material and show TypingSession
+    expect(wrapper.findComponent({ name: "TypingSession" }).exists()).toBe(true);
+  });
+
+  it("random respects tag filter", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(getProgress).mockResolvedValue(null);
+
+    const wrapper = await mountPlay();
+
+    // Filter to "科幻" — only "三体" should be selectable
+    const scifiTag = wrapper.findAll(".tag").find((t) => t.text() === "科幻");
+    await scifiTag!.trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".btn-random").trigger("click");
+    await flushPromises();
+
+    // The active material must be "三体" (id: mat2), not "小王子" (id: mat1)
+    const session = wrapper.findComponent({ name: "TypingSession" });
+    expect(session.exists()).toBe(true);
+    // Verify the selected material is "三体" by checking its segments
+    const segments = session.props("segments");
+    expect(segments[0].content).toBe("宇宙很大，生活更大。");
+  });
+});
+
 describe("PlayPage — progress save", () => {
   beforeEach(() => vi.clearAllMocks());
 
