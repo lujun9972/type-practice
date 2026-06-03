@@ -191,6 +191,272 @@ class TestPersistence:
         assert store2.get("abc")["title"] == "持久化测试"
 
 
+class TestExport:
+    """POST /api/materials/export"""
+
+    def _create_materials(self):
+        client.post(
+            "/api/materials",
+            json={"title": "静夜思", "tags": "唐诗,李白", "content": "床前明月光。疑是地上霜。"},
+        )
+        client.post(
+            "/api/materials",
+            json={"title": "春晓", "tags": "唐诗,孟浩然", "content": "春眠不觉晓。处处闻啼鸟。"},
+        )
+        client.post(
+            "/api/materials",
+            json={"title": "三体", "tags": "科幻", "content": "宇宙很大，生活更大。"},
+        )
+
+    def test_export_all_returns_version_and_materials(self):
+        self._create_materials()
+        response = client.post("/api/materials/export", json={"mode": "all"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["version"] == 1
+        assert "exportedAt" in body
+        assert len(body["materials"]) == 3
+        # Each material should NOT contain segments
+        for m in body["materials"]:
+            assert "segments" not in m
+            assert "id" in m
+            assert "title" in m
+            assert "tags" in m
+            assert "content" in m
+
+    def test_export_by_tags_filters_correctly(self):
+        self._create_materials()
+        response = client.post("/api/materials/export", json={"mode": "tags", "tags": ["唐诗"]})
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["materials"]) == 2
+        titles = [m["title"] for m in body["materials"]]
+        assert "静夜思" in titles
+        assert "春晓" in titles
+        assert "三体" not in titles
+
+    def test_export_by_ids_filters_correctly(self):
+        self._create_materials()
+        # Get all materials to find IDs
+        all_mats = client.get("/api/materials").json()
+        target_ids = [m["id"] for m in all_mats if m["title"] == "静夜思"]
+
+        response = client.post("/api/materials/export", json={"mode": "ids", "ids": target_ids})
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["materials"]) == 1
+        assert body["materials"][0]["title"] == "静夜思"
+
+    def test_export_empty_store_returns_valid_structure(self):
+        response = client.post("/api/materials/export", json={"mode": "all"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["version"] == 1
+        assert body["materials"] == []
+
+
+class TestImportDetect:
+    """POST /api/materials/import"""
+
+    def _make_import_file(self, materials: list[dict], version: int = 1) -> bytes:
+        """Helper to create a valid import JSON payload."""
+        import json
+        return json.dumps({
+            "version": version,
+            "materials": materials,
+        }).encode("utf-8")
+
+    def test_import_no_conflicts_returns_new_items(self):
+        import io
+        data = self._make_import_file([
+            {"id": "ext1", "title": "外部素材", "tags": ["test"], "content": "新内容。很好。"},
+        ])
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        assert len(body["conflicts"]) == 0
+        assert len(body["new"]) == 1
+        assert body["new"][0]["material"]["title"] == "外部素材"
+        assert "upload_id" in body
+
+    def test_import_detects_conflicts(self):
+        import io
+        # Create a local material first
+        client.post(
+            "/api/materials",
+            json={"title": "静夜思", "tags": "唐诗", "content": "床前明月光。"},
+        )
+        data = self._make_import_file([
+            {"id": "old1", "title": "静夜思", "tags": ["唐诗"], "content": "床前明月光。"},
+            {"id": "new1", "title": "春晓", "tags": ["唐诗"], "content": "春眠不觉晓。"},
+        ])
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 2
+        assert len(body["conflicts"]) == 1
+        assert body["conflicts"][0]["imported"]["title"] == "静夜思"
+        assert body["conflicts"][0]["local"]["title"] == "静夜思"
+        assert len(body["new"]) == 1
+        assert body["new"][0]["material"]["title"] == "春晓"
+
+    def test_import_missing_version_returns_400(self):
+        import io
+        data = b'{"materials": []}'
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert response.status_code == 400
+        assert "version" in response.json()["detail"].lower()
+
+    def test_import_unsupported_version_returns_400(self):
+        import io
+        data = self._make_import_file([], version=99)
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert response.status_code == 400
+        assert "version" in response.json()["detail"].lower()
+
+    def test_import_non_json_returns_400(self):
+        import io
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.txt", io.BytesIO(b"not json"), "text/plain")},
+        )
+        assert response.status_code == 400
+
+    def test_import_material_missing_title_returns_400(self):
+        import io
+        data = self._make_import_file([{"content": "no title"}])
+        response = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert response.status_code == 400
+        assert "title" in response.json()["detail"].lower()
+
+
+class TestImportResolve:
+    """POST /api/materials/import/resolve"""
+
+    def _upload_and_get_id(self, materials: list[dict]) -> str:
+        import io, json
+        data = json.dumps({"version": 1, "materials": materials}).encode("utf-8")
+        resp = client.post(
+            "/api/materials/import",
+            files={"file": ("export.json", io.BytesIO(data), "application/json")},
+        )
+        assert resp.status_code == 200
+        return resp.json()["upload_id"]
+
+    def test_keep_local_skips_import(self):
+        # Create local material
+        client.post(
+            "/api/materials",
+            json={"title": "静夜思", "tags": "唐诗", "content": "床前明月光。"},
+        )
+        upload_id = self._upload_and_get_id([
+            {"id": "old1", "title": "静夜思", "tags": ["唐诗"], "content": "床前明月光。"},
+        ])
+        response = client.post("/api/materials/import/resolve", json={
+            "upload_id": upload_id,
+            "decisions": [{"index": 0, "action": "keep_local"}],
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["skipped"] == 1
+        assert body["imported"] == 0
+        assert body["updated"] == 0
+
+    def test_use_imported_updates_local(self):
+        # Create local material
+        client.post(
+            "/api/materials",
+            json={"title": "静夜思", "tags": "旧标签", "content": "床前明月光。"},
+        )
+        upload_id = self._upload_and_get_id([
+            {"id": "old1", "title": "静夜思", "tags": ["新标签"], "content": "床前明月光。"},
+        ])
+        response = client.post("/api/materials/import/resolve", json={
+            "upload_id": upload_id,
+            "decisions": [{"index": 0, "action": "use_imported"}],
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["updated"] == 1
+        # Verify local was updated
+        materials = client.get("/api/materials").json()
+        assert len(materials) == 1
+        assert materials[0]["tags"] == ["新标签"]
+        assert len(materials[0]["segments"]) >= 1
+
+    def test_keep_both_creates_new(self):
+        # Create local material
+        client.post(
+            "/api/materials",
+            json={"title": "静夜思", "tags": "唐诗", "content": "床前明月光。"},
+        )
+        upload_id = self._upload_and_get_id([
+            {"id": "old1", "title": "静夜思", "tags": ["李白"], "content": "床前明月光。"},
+        ])
+        response = client.post("/api/materials/import/resolve", json={
+            "upload_id": upload_id,
+            "decisions": [{"index": 0, "action": "keep_both"}],
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["imported"] == 1
+        # Should now have 2 materials
+        materials = client.get("/api/materials").json()
+        assert len(materials) == 2
+
+    def test_new_materials_auto_imported(self):
+        upload_id = self._upload_and_get_id([
+            {"id": "new1", "title": "春晓", "tags": ["唐诗"], "content": "春眠不觉晓。处处闻啼鸟。"},
+        ])
+        response = client.post("/api/materials/import/resolve", json={
+            "upload_id": upload_id,
+            "decisions": [],
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["imported"] == 1
+        # Verify material was created with segments
+        materials = client.get("/api/materials").json()
+        assert len(materials) == 1
+        assert materials[0]["title"] == "春晓"
+        assert len(materials[0]["segments"]) >= 1
+
+    def test_invalid_upload_id_returns_404(self):
+        response = client.post("/api/materials/import/resolve", json={
+            "upload_id": "nonexistent",
+            "decisions": [],
+        })
+        assert response.status_code == 404
+
+    def test_segments_generated_from_content_on_import(self):
+        upload_id = self._upload_and_get_id([
+            {"id": "seg1", "title": "分段测试", "tags": [], "content": "第一句。第二句。第三句。"},
+        ])
+        client.post("/api/materials/import/resolve", json={
+            "upload_id": upload_id,
+            "decisions": [],
+        })
+        materials = client.get("/api/materials").json()
+        assert len(materials[0]["segments"]) >= 2
+        assert all(s["type"] == "text" for s in materials[0]["segments"])
+
+
 class TestFetchUrl:
     """POST /api/fetch/url"""
 

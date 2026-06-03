@@ -74,10 +74,103 @@
       <div v-if="materials.length === 0 && !loading" class="empty">暂无素材</div>
       <div v-else class="material-list">
         <div v-for="mat in materials" :key="mat.id" class="material-item" @click="onView(mat)">
+          <input
+            v-if="showExportPanel && exportMode === 'ids'"
+            type="checkbox"
+            :value="mat.id"
+            v-model="exportSelectedIds"
+            @click.stop
+            class="export-checkbox"
+          />
           <span class="title">{{ mat.title }}</span>
           <span v-for="tag in mat.tags" :key="tag" class="tag">{{ tag }}</span>
           <button class="btn-delete" @click.stop="onDelete(mat.id)">删除</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Export / Import controls -->
+    <div class="import-export-bar">
+      <button class="btn-export-toggle" @click="showExportPanel = !showExportPanel; showImportPanel = false">
+        {{ showExportPanel ? "关闭导出" : "导出" }}
+      </button>
+      <button class="btn-import-toggle" @click="showImportPanel = !showImportPanel; showExportPanel = false">
+        {{ showImportPanel ? "关闭导入" : "导入" }}
+      </button>
+    </div>
+
+    <!-- Export panel -->
+    <div v-if="showExportPanel" class="export-panel">
+      <div class="export-mode-row">
+        <label>
+          <input type="radio" v-model="exportMode" value="all" /> 全部
+        </label>
+        <label>
+          <input type="radio" v-model="exportMode" value="tags" /> 按标签
+        </label>
+        <label>
+          <input type="radio" v-model="exportMode" value="ids" /> 手动选择
+        </label>
+      </div>
+
+      <div v-if="exportMode === 'tags'" class="tag-filter-row">
+        <label v-for="tag in allTags" :key="tag" class="tag-chip-label">
+          <input type="checkbox" :value="tag" v-model="exportTagFilter" />
+          <span class="tag">{{ tag }}</span>
+        </label>
+      </div>
+
+      <div v-if="exportMode === 'ids'" class="select-all-row">
+        <label>
+          <input type="checkbox" v-model="exportSelectAll" @change="toggleExportSelectAll" />
+          全选 / 取消全选
+        </label>
+      </div>
+
+      <button class="btn-confirm-export" @click="onExport" :disabled="loading">
+        {{ loading ? "导出中..." : "确认导出" }}
+      </button>
+    </div>
+
+    <!-- Import panel -->
+    <div v-if="showImportPanel" class="import-panel">
+      <div class="import-file-row">
+        <input
+          type="file"
+          accept=".json"
+          @change="onImportFileSelect"
+          class="import-file-input"
+          :disabled="loading"
+        />
+      </div>
+
+      <!-- Import summary -->
+      <div v-if="importSummary" class="import-summary">
+        {{ importSummary }}
+      </div>
+    </div>
+
+    <!-- Conflict resolution dialog -->
+    <div v-if="importConflicts.length > 0 && importCurrentConflictIdx < importConflicts.length" class="conflict-dialog">
+      <h3>素材冲突 ({{ importCurrentConflictIdx + 1 }}/{{ importConflicts.length }})</h3>
+      <div class="conflict-sides">
+        <div class="conflict-side">
+          <h4>本地版本</h4>
+          <div class="conflict-field"><strong>标题:</strong> {{ importConflicts[importCurrentConflictIdx].local.title }}</div>
+          <div class="conflict-field"><strong>标签:</strong> {{ importConflicts[importCurrentConflictIdx].local.tags.join(", ") || "无" }}</div>
+          <div class="conflict-field"><strong>内容:</strong> {{ importConflicts[importCurrentConflictIdx].local.content.slice(0, 100) }}{{ importConflicts[importCurrentConflictIdx].local.content.length > 100 ? "..." : "" }}</div>
+        </div>
+        <div class="conflict-side">
+          <h4>导入版本</h4>
+          <div class="conflict-field"><strong>标题:</strong> {{ importConflicts[importCurrentConflictIdx].imported.title }}</div>
+          <div class="conflict-field"><strong>标签:</strong> {{ importConflicts[importCurrentConflictIdx].imported.tags.join(", ") || "无" }}</div>
+          <div class="conflict-field"><strong>内容:</strong> {{ importConflicts[importCurrentConflictIdx].imported.content.slice(0, 100) }}{{ importConflicts[importCurrentConflictIdx].imported.content.length > 100 ? "..." : "" }}</div>
+        </div>
+      </div>
+      <div class="conflict-actions">
+        <button class="btn-keep-local" @click="onConflictDecision('keep_local')">保留本地</button>
+        <button class="btn-use-imported" @click="onConflictDecision('use_imported')">使用导入的</button>
+        <button class="btn-keep-both" @click="onConflictDecision('keep_both')">两个都保留</button>
       </div>
     </div>
 
@@ -191,8 +284,11 @@ import {
   setToken,
   clearToken,
   getToken,
+  exportMaterials,
+  importMaterials,
+  importResolve,
 } from "@/api/materials";
-import type { Material, Segment } from "@/api/materials";
+import type { Material, Segment, ExportRequest, ImportConflict } from "@/api/materials";
 
 const materials = ref<Material[]>([]);
 const previewData = ref<Segment[]>([]);
@@ -232,6 +328,23 @@ const previewForm = reactive({ title: "", tags: "" });
 const passwordSet = ref(false);
 const authenticated = ref(false);
 const authPassword = ref("");
+
+// ── Export state ──
+const exportMode = ref<"all" | "tags" | "ids">("all");
+const exportTagFilter = ref<string[]>([]);
+const exportSelectedIds = ref<string[]>([]);
+const exportSelectAll = ref(false);
+const showExportPanel = ref(false);
+
+// ── Import state ──
+const showImportPanel = ref(false);
+const importUploadId = ref("");
+const importConflicts = ref<ImportConflict[]>([]);
+const importConflictDecisions = ref<Record<number, "keep_local" | "use_imported" | "keep_both">>({});
+const importCurrentConflictIdx = ref(0);
+const importNewCount = ref(0);
+const importTotal = ref(0);
+const importSummary = ref<string | null>(null);
 
 async function refresh() {
   try {
@@ -371,6 +484,106 @@ async function onFetchUrl() {
   } finally {
     loading.value = false;
   }
+}
+
+// ── Computed ──
+const allTags = computed(() => {
+  const tagSet = new Set<string>();
+  for (const m of materials.value) {
+    for (const t of m.tags) tagSet.add(t);
+  }
+  return Array.from(tagSet).sort();
+});
+
+// ── Export methods ──
+async function onExport() {
+  try {
+    loading.value = true;
+    error.value = "";
+    const req: ExportRequest = { mode: exportMode.value };
+    if (exportMode.value === "tags") {
+      req.tags = exportTagFilter.value;
+    } else if (exportMode.value === "ids") {
+      req.ids = exportSelectedIds.value;
+    }
+    const data = await exportMaterials(req);
+    // Trigger download
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "materials-export.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    showExportPanel.value = false;
+  } catch (e) {
+    error.value = "导出失败：" + handleAuthError(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function toggleExportSelectAll() {
+  if (exportSelectAll.value) {
+    exportSelectedIds.value = materials.value.map((m) => m.id);
+  } else {
+    exportSelectedIds.value = [];
+  }
+}
+
+// ── Import methods ──
+function onImportFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  handleImportFile(file);
+  input.value = "";
+}
+
+async function handleImportFile(file: File) {
+  try {
+    loading.value = true;
+    error.value = "";
+    importSummary.value = null;
+    const result = await importMaterials(file);
+    importUploadId.value = result.upload_id;
+    importTotal.value = result.total;
+    importNewCount.value = result.new.length;
+    importConflicts.value = result.conflicts;
+    importConflictDecisions.value = {};
+    importCurrentConflictIdx.value = 0;
+
+    if (result.conflicts.length === 0) {
+      // No conflicts — auto-resolve
+      await doImportResolve();
+    }
+  } catch (e) {
+    error.value = "导入失败：" + handleAuthError(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function onConflictDecision(action: "keep_local" | "use_imported" | "keep_both") {
+  const conflict = importConflicts.value[importCurrentConflictIdx.value];
+  importConflictDecisions.value[conflict.index] = action;
+  importCurrentConflictIdx.value++;
+
+  if (importCurrentConflictIdx.value >= importConflicts.value.length) {
+    await doImportResolve();
+  }
+}
+
+async function doImportResolve() {
+  const decisions = Object.entries(importConflictDecisions.value).map(([idx, action]) => ({
+    index: Number(idx),
+    action,
+  }));
+  const result = await importResolve(importUploadId.value, decisions);
+  importSummary.value = `导入完成: ${result.imported} 条导入, ${result.skipped} 条跳过, ${result.updated} 条更新`;
+  importConflicts.value = [];
+  importCurrentConflictIdx.value = 0;
+  await refresh();
 }
 
 async function onGenerate() {
@@ -785,6 +998,180 @@ form input, form textarea {
 
 .auth-form button {
   padding: 0.5rem 1rem;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #93c5fd;
+  cursor: pointer;
+}
+
+/* ── Export / Import ── */
+.import-export-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.btn-export-toggle,
+.btn-import-toggle {
+  padding: 0.4rem 1rem;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #93c5fd;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.export-panel,
+.import-panel {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: #1e293b;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+}
+
+.export-mode-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.export-mode-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.tag-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.tag-chip-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+}
+
+.select-all-row {
+  margin-bottom: 0.75rem;
+  color: #aaa;
+}
+
+.select-all-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.btn-confirm-export {
+  padding: 0.5rem 1rem;
+  background: #14532d;
+  border: 1px solid #22c55e;
+  border-radius: 6px;
+  color: #86efac;
+  cursor: pointer;
+}
+
+.btn-confirm-export:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.export-checkbox {
+  margin-right: 0.3rem;
+}
+
+.import-file-input {
+  font-size: 0.9rem;
+  color: #ccc;
+}
+
+.import-summary {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: #14532d;
+  border-radius: 6px;
+  color: #86efac;
+}
+
+/* ── Conflict dialog ── */
+.conflict-dialog {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #1e293b;
+  border: 2px solid #f59e0b;
+  border-radius: 8px;
+}
+
+.conflict-dialog h3 {
+  margin-top: 0;
+  color: #f59e0b;
+}
+
+.conflict-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.conflict-side {
+  padding: 0.75rem;
+  background: #111827;
+  border-radius: 6px;
+}
+
+.conflict-side h4 {
+  margin: 0 0 0.5rem;
+  color: #93c5fd;
+  font-size: 0.9rem;
+}
+
+.conflict-field {
+  font-size: 0.85rem;
+  color: #ccc;
+  margin-bottom: 0.3rem;
+}
+
+.conflict-field strong {
+  color: #aaa;
+}
+
+.conflict-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.btn-keep-local {
+  padding: 0.4rem 1rem;
+  background: #7f1d1d;
+  border: none;
+  border-radius: 6px;
+  color: #fca5a5;
+  cursor: pointer;
+}
+
+.btn-use-imported {
+  padding: 0.4rem 1rem;
+  background: #14532d;
+  border: 1px solid #22c55e;
+  border-radius: 6px;
+  color: #86efac;
+  cursor: pointer;
+}
+
+.btn-keep-both {
+  padding: 0.4rem 1rem;
   background: #1e3a5f;
   border: 1px solid #3b82f6;
   border-radius: 6px;

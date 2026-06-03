@@ -20,9 +20,12 @@ vi.mock("@/api/materials", () => ({
   setToken: vi.fn(),
   clearToken: vi.fn(),
   getToken: vi.fn(() => "existing-token"),
+  exportMaterials: vi.fn(),
+  importMaterials: vi.fn(),
+  importResolve: vi.fn(),
 }));
 
-import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic, getAuthStatus, authSetup, authLogin, setToken, getToken } from "@/api/materials";
+import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic, getAuthStatus, authSetup, authLogin, setToken, getToken, exportMaterials, importMaterials, importResolve } from "@/api/materials";
 
 const MOCK_MATERIALS: Material[] = [
   {
@@ -468,5 +471,208 @@ describe("AdminPage — auth gate", () => {
     expect(authLogin).toHaveBeenCalledWith("mypassword");
     expect(setToken).toHaveBeenCalledWith("test-token");
     expect(wrapper.find(".material-item").exists()).toBe(true);
+  });
+});
+
+describe("AdminPage — export", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getToken).mockReturnValue("existing-token");
+  });
+
+  it("export button toggles export panel", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    expect(wrapper.find(".export-panel").exists()).toBe(false);
+    await wrapper.find(".btn-export-toggle").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".export-panel").exists()).toBe(true);
+  });
+
+  it("export panel shows three mode options", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-export-toggle").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".export-mode-row").exists()).toBe(true);
+    const radios = wrapper.findAll('.export-mode-row input[type="radio"]');
+    expect(radios).toHaveLength(3);
+  });
+
+  it("confirm export calls API and triggers download", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const exportData = { version: 1, exportedAt: "2026-06-03T00:00:00Z", materials: MOCK_MATERIALS.map(m => ({ id: m.id, title: m.title, tags: m.tags, content: m.content })) };
+    vi.mocked(exportMaterials).mockResolvedValue(exportData);
+
+    // Mock URL.createObjectURL
+    const mockUrl = "blob:mock-url";
+    const createObjectURL = vi.fn(() => mockUrl);
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-export-toggle").trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".btn-confirm-export").trigger("click");
+    await flushPromises();
+
+    expect(exportMaterials).toHaveBeenCalledWith({ mode: "all" });
+    expect(createObjectURL).toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
+
+  it("shows checkboxes on material cards when mode=ids", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-export-toggle").trigger("click");
+    await flushPromises();
+
+    // Switch to manual mode
+    const radios = wrapper.findAll('.export-mode-row input[type="radio"]');
+    await radios[2].setValue(); // ids mode
+    await flushPromises();
+
+    expect(wrapper.find(".export-checkbox").exists()).toBe(true);
+  });
+});
+
+describe("AdminPage — import", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getToken).mockReturnValue("existing-token");
+  });
+
+  it("import button toggles import panel", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    expect(wrapper.find(".import-panel").exists()).toBe(false);
+    await wrapper.find(".btn-import-toggle").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".import-panel").exists()).toBe(true);
+  });
+
+  it("import panel shows file input accepting .json", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-import-toggle").trigger("click");
+    await flushPromises();
+
+    const fileInput = wrapper.find(".import-file-input");
+    expect(fileInput.exists()).toBe(true);
+    expect(fileInput.attributes("accept")).toBe(".json");
+  });
+
+  it("import with no conflicts auto-resolves and shows summary", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(importMaterials).mockResolvedValue({
+      upload_id: "test-upload-id",
+      total: 2,
+      conflicts: [],
+      new: [
+        { index: 0, material: { id: "new1", title: "春晓", tags: ["唐诗"], content: "春眠不觉晓。" } },
+        { index: 1, material: { id: "new2", title: "静夜思", tags: ["唐诗"], content: "床前明月光。" } },
+      ],
+    });
+    vi.mocked(importResolve).mockResolvedValue({ imported: 2, skipped: 0, updated: 0, total: 2 });
+    vi.mocked(listMaterials).mockResolvedValueOnce([...MOCK_MATERIALS]);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-import-toggle").trigger("click");
+    await flushPromises();
+
+    // Simulate file selection
+    const file = new File(["test"], "export.json", { type: "application/json" });
+    Object.defineProperty(wrapper.find(".import-file-input").element, "files", {
+      value: [file],
+      writable: false,
+    });
+    await wrapper.find(".import-file-input").trigger("change");
+    await flushPromises();
+
+    expect(importMaterials).toHaveBeenCalled();
+    expect(importResolve).toHaveBeenCalledWith("test-upload-id", []);
+    expect(wrapper.find(".import-summary").exists()).toBe(true);
+    expect(wrapper.find(".import-summary").text()).toContain("2 条导入");
+  });
+
+  it("import with conflicts shows conflict dialog", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(importMaterials).mockResolvedValue({
+      upload_id: "test-upload-id",
+      total: 2,
+      conflicts: [{
+        index: 0,
+        imported: { id: "old1", title: "静夜思", tags: ["唐诗"], content: "床前明月光。" },
+        local: { id: "abc123", title: "静夜思", tags: ["童话", "经典"], content: "床前明月光。" },
+      }],
+      new: [{ index: 1, material: { id: "new1", title: "春晓", tags: ["唐诗"], content: "春眠不觉晓。" } }],
+    });
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-import-toggle").trigger("click");
+    await flushPromises();
+
+    const file = new File(["test"], "export.json", { type: "application/json" });
+    Object.defineProperty(wrapper.find(".import-file-input").element, "files", {
+      value: [file],
+      writable: false,
+    });
+    await wrapper.find(".import-file-input").trigger("change");
+    await flushPromises();
+
+    // Conflict dialog should be visible
+    expect(wrapper.find(".conflict-dialog").exists()).toBe(true);
+    expect(wrapper.find(".conflict-dialog").text()).toContain("素材冲突");
+    expect(wrapper.find(".conflict-dialog").text()).toContain("1/1");
+    expect(wrapper.find(".btn-keep-local").exists()).toBe(true);
+    expect(wrapper.find(".btn-use-imported").exists()).toBe(true);
+    expect(wrapper.find(".btn-keep-both").exists()).toBe(true);
+  });
+
+  it("resolving conflict calls resolve API and shows summary", async () => {
+    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
+    vi.mocked(importMaterials).mockResolvedValue({
+      upload_id: "test-upload-id",
+      total: 1,
+      conflicts: [{
+        index: 0,
+        imported: { id: "old1", title: "静夜思", tags: ["唐诗"], content: "床前明月光。" },
+        local: { id: "abc123", title: "静夜思", tags: ["童话", "经典"], content: "床前明月光。" },
+      }],
+      new: [],
+    });
+    vi.mocked(importResolve).mockResolvedValue({ imported: 0, skipped: 1, updated: 0, total: 1 });
+    vi.mocked(listMaterials).mockResolvedValueOnce(MOCK_MATERIALS);
+
+    const wrapper = await mountAdmin();
+
+    await wrapper.find(".btn-import-toggle").trigger("click");
+    await flushPromises();
+
+    const file = new File(["test"], "export.json", { type: "application/json" });
+    Object.defineProperty(wrapper.find(".import-file-input").element, "files", {
+      value: [file],
+      writable: false,
+    });
+    await wrapper.find(".import-file-input").trigger("change");
+    await flushPromises();
+
+    // Click "keep local"
+    await wrapper.find(".btn-keep-local").trigger("click");
+    await flushPromises();
+
+    expect(importResolve).toHaveBeenCalledWith("test-upload-id", [{ index: 0, action: "keep_local" }]);
+    expect(wrapper.find(".import-summary").text()).toContain("1 条跳过");
   });
 });

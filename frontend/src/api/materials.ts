@@ -245,3 +245,86 @@ export async function authChangePassword(
     throw new Error(err.detail || `Password change failed (${res.status})`);
   }
 }
+
+// ── Export / Import ────────────────────────────────────
+
+export interface ExportRequest {
+  mode: "all" | "tags" | "ids";
+  tags?: string[];
+  ids?: string[];
+}
+
+export interface ExportData {
+  version: number;
+  exportedAt: string;
+  materials: { id: string; title: string; tags: string[]; content: string }[];
+}
+
+export async function exportMaterials(req: ExportRequest): Promise<ExportData> {
+  const res = await fetch(`${API_BASE}/materials/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Export failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ImportConflict {
+  index: number;
+  imported: { id: string; title: string; tags: string[]; content: string };
+  local: { id: string; title: string; tags: string[]; content: string };
+}
+
+export interface ImportNewItem {
+  index: number;
+  material: { id: string; title: string; tags: string[]; content: string };
+}
+
+export interface ImportDetectResult {
+  upload_id: string;
+  total: number;
+  conflicts: ImportConflict[];
+  new: ImportNewItem[];
+}
+
+export async function importMaterials(file: File): Promise<ImportDetectResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/materials/import`, {
+    method: "POST",
+    headers: authHeader(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Import failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export interface ImportResolveResult {
+  imported: number;
+  skipped: number;
+  updated: number;
+  total: number;
+}
+
+export async function importResolve(
+  uploadId: string,
+  decisions: { index: number; action: "keep_local" | "use_imported" | "keep_both" }[],
+): Promise<ImportResolveResult> {
+  const res = await fetch(`${API_BASE}/materials/import/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify({ upload_id: uploadId, decisions }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Resolve failed (${res.status})`);
+  }
+  return res.json();
+}
