@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import AdminPage from "@/pages/AdminPage.vue";
-import type { Material } from "@/api/materials";
+import type { Material } from "@/api/types";
 
-// Mock the API module
+// Mock the API modules
 vi.mock("@/api/materials", () => ({
   listMaterials: vi.fn(),
   createMaterial: vi.fn(),
@@ -14,18 +14,27 @@ vi.mock("@/api/materials", () => ({
   updateMaterial: vi.fn(),
   fetchUrl: vi.fn(),
   fetchTopic: vi.fn(),
+}));
+
+vi.mock("@/api/auth", () => ({
+  authHeader: vi.fn(() => ({})),
   getAuthStatus: vi.fn(() => Promise.resolve({ passwordSet: true })),
   authSetup: vi.fn(),
   authLogin: vi.fn(),
   setToken: vi.fn(),
   clearToken: vi.fn(),
   getToken: vi.fn(() => "existing-token"),
+}));
+
+vi.mock("@/api/import_export", () => ({
   exportMaterials: vi.fn(),
   importMaterials: vi.fn(),
   importResolve: vi.fn(),
 }));
 
-import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic, getAuthStatus, authSetup, authLogin, setToken, getToken, exportMaterials, importMaterials, importResolve } from "@/api/materials";
+import { listMaterials, createMaterial, deleteMaterial, previewSegments, getMaterial, updateMaterial, fetchUrl, fetchTopic } from "@/api/materials";
+import { getAuthStatus, authSetup, authLogin, setToken, getToken } from "@/api/auth";
+import { exportMaterials, importMaterials, importResolve } from "@/api/import_export";
 
 const MOCK_MATERIALS: Material[] = [
   {

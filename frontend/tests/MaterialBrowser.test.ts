@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import MaterialBrowser from "@/components/MaterialBrowser.vue";
-import type { Material } from "@/api/materials";
+import type { Material } from "@/api/types";
 
 const MOCK_MATERIALS: Material[] = [
   {

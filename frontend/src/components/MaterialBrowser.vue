@@ -53,7 +53,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import type { Material } from "@/api/materials";
+import type { Material } from "@/api/types";
 
 const TAG_BAR_LIMIT = 8;
 

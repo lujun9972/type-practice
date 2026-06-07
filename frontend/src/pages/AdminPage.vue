@@ -261,13 +261,14 @@ import {
   updateMaterial,
   fetchUrl,
   fetchTopic,
+} from "@/api/materials";
+import {
   exportMaterials,
   importMaterials,
   importResolve,
-  getToken,
-  clearToken,
-} from "@/api/materials";
-import type { Material, ExportRequest, ImportConflict } from "@/api/materials";
+} from "@/api/import_export";
+import { getToken, clearToken } from "@/api/auth";
+import type { Material, ExportRequest, ImportConflict } from "@/api/types";
 import MaterialBrowser from "@/components/MaterialBrowser.vue";
 import AuthGate from "@/components/admin/AuthGate.vue";
 import TextMaterialForm from "@/components/admin/TextMaterialForm.vue";

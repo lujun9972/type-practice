@@ -93,8 +93,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { getConfig, updateConfig, getAuthStatus, authSetup, authLogin, setToken, clearToken, getToken, authChangePassword } from "@/api/materials";
-import type { AppConfig } from "@/api/materials";
+import { getConfig, updateConfig } from "@/api/progress";
+import { getAuthStatus, authSetup, authLogin, setToken, clearToken, getToken, authChangePassword } from "@/api/auth";
+import type { AppConfig } from "@/api/types";
 
 const config = ref<AppConfig | null>(null);
 const loading = ref(false);

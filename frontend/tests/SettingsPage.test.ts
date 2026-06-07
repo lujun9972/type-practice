@@ -3,9 +3,13 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import SettingsPage from "@/pages/SettingsPage.vue";
 
-vi.mock("@/api/materials", () => ({
+vi.mock("@/api/progress", () => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
+}));
+
+vi.mock("@/api/auth", () => ({
+  authHeader: vi.fn(() => ({})),
   getAuthStatus: vi.fn(() => Promise.resolve({ passwordSet: true })),
   authSetup: vi.fn(),
   authLogin: vi.fn(),
@@ -15,7 +19,8 @@ vi.mock("@/api/materials", () => ({
   authChangePassword: vi.fn(),
 }));
 
-import { getConfig, updateConfig, getAuthStatus, authLogin, setToken, getToken, authChangePassword } from "@/api/materials";
+import { getConfig, updateConfig } from "@/api/progress";
+import { getAuthStatus, authLogin, setToken, getToken, authChangePassword } from "@/api/auth";
 
 const DEFAULT_CONFIG = {
   skipPunctuation: true,

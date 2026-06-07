@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from "vue";
-import { getToken } from "@/api/materials";
-import type { Segment } from "@/api/materials";
+import { getToken } from "@/api/auth";
+import type { Segment } from "@/api/types";
 
 const form = reactive({ title: "", tags: "" });
 const videoFile = ref<File | null>(null);

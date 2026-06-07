@@ -2,19 +2,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import PlayPage from "@/pages/PlayPage.vue";
-import type { Material } from "@/api/materials";
+import type { Material } from "@/api/types";
 
 vi.mock("@/api/materials", () => ({
   listMaterials: vi.fn(),
   getMaterial: vi.fn(),
   fetchUrl: vi.fn(),
   fetchTopic: vi.fn(),
+}));
+
+vi.mock("@/api/progress", () => ({
   getProgress: vi.fn(),
   saveProgress: vi.fn(),
   deleteProgress: vi.fn(),
+  getConfig: vi.fn(),
 }));
 
-import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress } from "@/api/materials";
+import { listMaterials, getMaterial, fetchUrl, fetchTopic } from "@/api/materials";
+import { getProgress, saveProgress } from "@/api/progress";
 
 const MOCK_MATERIALS: Material[] = [
   {

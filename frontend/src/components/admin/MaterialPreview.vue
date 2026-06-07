@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive } from "vue";
 import { createMaterial } from "@/api/materials";
-import type { Material } from "@/api/materials";
+import type { Material } from "@/api/types";
 
 const props = defineProps<{ material: Material }>();
 const previewForm = reactive({ title: "", tags: "" });

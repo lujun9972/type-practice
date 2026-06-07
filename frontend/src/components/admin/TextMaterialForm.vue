@@ -5,7 +5,7 @@ import {
   previewSegments as previewSplit,
   getToken,
 } from "@/api/materials";
-import type { Segment } from "@/api/materials";
+import type { Segment } from "@/api/types";
 
 const form = reactive({ title: "", tags: "", content: "" });
 const previewData = ref<Segment[]>([]);

@@ -107,8 +107,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress, deleteProgress, getConfig } from "@/api/materials";
-import type { Material, Progress } from "@/api/materials";
+import { listMaterials, getMaterial, fetchUrl, fetchTopic } from "@/api/materials";
+import { getProgress, saveProgress, deleteProgress } from "@/api/progress";
+import { getConfig } from "@/api/progress";
+import type { Material, Progress } from "@/api/types";
 import TypingSession from "@/components/TypingSession.vue";
 import MaterialBrowser from "@/components/MaterialBrowser.vue";
 

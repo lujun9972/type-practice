@@ -7,7 +7,7 @@ import {
   setToken,
   clearToken,
   getToken,
-} from "@/api/materials";
+} from "@/api/auth";
 
 const passwordSet = ref(false);
 const authenticated = ref(false);
