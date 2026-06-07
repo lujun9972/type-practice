@@ -143,8 +143,7 @@ describe("AdminPage — delete", () => {
     vi.clearAllMocks();
   });
 
-  it("delete button removes material from list", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("delete button shows confirm/cancel, then confirm removes material", async () => {
     const mat: Material = {
       id: "del1",
       title: "待删除",
@@ -159,11 +158,46 @@ describe("AdminPage — delete", () => {
     const wrapper = await mountAdmin();
     expect(wrapper.text()).toContain("待删除");
 
+    // Step 1: click delete → shows confirm/cancel
     await wrapper.find(".btn-delete").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".btn-confirm-action").exists()).toBe(true);
+    expect(wrapper.find(".btn-cancel-action").exists()).toBe(true);
+
+    // Step 2: click confirm → deletes and refreshes
+    await wrapper.find(".btn-confirm-action").trigger("click");
     await flushPromises();
 
     expect(deleteMaterial).toHaveBeenCalledWith("del1");
     expect(wrapper.text()).toContain("暂无素材");
+  });
+
+  it("delete can be cancelled", async () => {
+    const mat: Material = {
+      id: "del2",
+      title: "待删除2",
+      tags: [],
+      content: "内容。",
+      segments: [],
+    };
+    vi.mocked(listMaterials).mockResolvedValue([mat]);
+
+    const wrapper = await mountAdmin();
+
+    // Click delete → shows confirm/cancel
+    await wrapper.find(".btn-delete").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".btn-confirm-action").exists()).toBe(true);
+
+    // Click cancel → reverts to delete button
+    await wrapper.find(".btn-cancel-action").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".btn-delete").exists()).toBe(true);
+    expect(wrapper.find(".btn-confirm-action").exists()).toBe(false);
+    expect(deleteMaterial).not.toHaveBeenCalled();
   });
 });
 
@@ -204,7 +238,7 @@ describe("AdminPage — view detail", () => {
     const wrapper = await mountAdmin();
 
     // Click the first material card.
-    await wrapper.find(".material-item").trigger("click");
+    await wrapper.find(".material-card").trigger("click");
     await flushPromises();
 
     // Detail view should show title, tags, content, segments, word count.
@@ -219,14 +253,14 @@ describe("AdminPage — view detail", () => {
     vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
     const wrapper = await mountAdmin();
 
-    await wrapper.find(".material-item").trigger("click");
+    await wrapper.find(".material-card").trigger("click");
     await flushPromises();
     expect(wrapper.find(".detail-view").exists()).toBe(true);
 
     await wrapper.find(".btn-back").trigger("click");
     await flushPromises();
     expect(wrapper.find(".detail-view").exists()).toBe(false);
-    expect(wrapper.findAll(".material-item")).toHaveLength(2);
+    expect(wrapper.findAll(".material-card")).toHaveLength(2);
   });
 });
 
@@ -248,7 +282,7 @@ describe("AdminPage — edit", () => {
     const wrapper = await mountAdmin();
 
     // Enter detail view.
-    await wrapper.find(".material-item").trigger("click");
+    await wrapper.find(".material-card").trigger("click");
     await flushPromises();
 
     // Click edit.
@@ -295,7 +329,7 @@ describe("AdminPage — edit", () => {
 
     const wrapper = await mountAdmin();
 
-    await wrapper.find(".material-item").trigger("click");
+    await wrapper.find(".material-card").trigger("click");
     await flushPromises();
 
     await wrapper.find(".btn-edit").trigger("click");
@@ -455,7 +489,7 @@ describe("AdminPage — auth gate", () => {
 
     expect(authSetup).toHaveBeenCalledWith("mypassword");
     expect(setToken).toHaveBeenCalledWith("test-token");
-    expect(wrapper.find(".material-item").exists()).toBe(true);
+    expect(wrapper.find(".material-card").exists()).toBe(true);
   });
 
   it("login with correct password shows admin content", async () => {
@@ -471,7 +505,7 @@ describe("AdminPage — auth gate", () => {
 
     expect(authLogin).toHaveBeenCalledWith("mypassword");
     expect(setToken).toHaveBeenCalledWith("test-token");
-    expect(wrapper.find(".material-item").exists()).toBe(true);
+    expect(wrapper.find(".material-card").exists()).toBe(true);
   });
 });
 

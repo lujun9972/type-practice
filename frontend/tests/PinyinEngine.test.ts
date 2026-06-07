@@ -158,3 +158,31 @@ describe("PinyinEngine — display info", () => {
     expect(info[1].pinyin).toBeTruthy(); // e.g. "hǎo"
   });
 });
+
+describe("PinyinEngine — ü characters accept 'v' input", () => {
+  it("绿 (lǜ) accepts 'lv' as typed input", () => {
+    const engine = new PinyinEngine("绿");
+    expect(engine.targets[0].matchPinyin).toBe("lv");
+    engine.input("l");
+    engine.input("v");
+    expect(engine.chars[0].status).toBe("correct");
+    expect(engine.isComplete).toBe(true);
+  });
+
+  it("女 (nǚ) accepts 'nv' as typed input", () => {
+    const engine = new PinyinEngine("女");
+    expect(engine.targets[0].matchPinyin).toBe("nv");
+    engine.input("n");
+    engine.input("v");
+    expect(engine.chars[0].status).toBe("correct");
+    expect(engine.isComplete).toBe(true);
+  });
+
+  it("吕 (lǚ) accepts 'lv' as typed input", () => {
+    const engine = new PinyinEngine("吕");
+    expect(engine.targets[0].matchPinyin).toBe("lv");
+    engine.input("l");
+    engine.input("v");
+    expect(engine.isComplete).toBe(true);
+  });
+});

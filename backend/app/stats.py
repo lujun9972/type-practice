@@ -25,6 +25,12 @@ DAILY_GOAL_PRESETS = {
     "challenge": 300,
 }
 
+TIME_GOAL_PRESETS = {
+    "easy": 300,
+    "normal": 600,
+    "challenge": 1200,
+}
+
 MAX_REPAIR_ITEMS = 3
 
 
@@ -43,9 +49,11 @@ class StatsStore:
             },
             "dailyGoals": {},
             "xpHistory": {},
+            "timeHistory": {},
         }
         if self._path.exists():
             self._data = json.loads(self._path.read_text(encoding="utf-8"))
+        self._data.setdefault("timeHistory", {})
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +124,17 @@ class StatsStore:
         today = date or datetime.now().strftime("%Y-%m-%d")
         level, title, next_xp = self._compute_level(self._data["totalXp"])
         goal = self._data["dailyGoals"].get(today)
-        today_earned = self._data["xpHistory"].get(today, 0)
+        today_xp_earned = self._data["xpHistory"].get(today, 0)
+        today_time_earned = self._data["timeHistory"].get(today, 0)
+
+        goal_type = None
+        if goal:
+            goal_type = goal.get("type", "xp")
+
+        if goal and goal_type == "time":
+            today_earned = goal["earned"]
+        else:
+            today_earned = today_xp_earned if goal else 0
 
         return {
             "totalXp": self._data["totalXp"],
@@ -127,6 +145,8 @@ class StatsStore:
             "todayTarget": goal["target"] if goal else None,
             "todayEarned": today_earned if goal else 0,
             "todayCompleted": self._check_daily_completed(today),
+            "goalType": goal_type,
+            "todayTimeEarned": today_time_earned,
         }
 
     def add_xp(self, amount: int, date: str | None = None) -> None:
@@ -135,22 +155,47 @@ class StatsStore:
         self._data["totalXp"] += amount
         self._data["xpHistory"][today] = self._data["xpHistory"].get(today, 0) + amount
 
-        # Update daily goal earned
         if today in self._data["dailyGoals"]:
-            self._data["dailyGoals"][today]["earned"] += amount
+            goal = self._data["dailyGoals"][today]
+            if goal.get("type", "xp") == "xp":
+                goal["earned"] += amount
 
         self._recalc_streak(today)
         self._flush()
 
-    def set_daily_goal(self, difficulty: str, date: str | None = None) -> None:
+    def add_time(self, seconds: int, date: str | None = None) -> None:
         today = date or datetime.now().strftime("%Y-%m-%d")
-        target = DAILY_GOAL_PRESETS[difficulty]
-        # Preserve earned if already has some XP today
-        earned = self._data["xpHistory"].get(today, 0)
+        self._data["timeHistory"][today] = self._data["timeHistory"].get(today, 0) + seconds
+
+        if today in self._data["dailyGoals"]:
+            goal = self._data["dailyGoals"][today]
+            if goal.get("type", "xp") == "time":
+                goal["earned"] += seconds
+
+        self._recalc_streak(today)
+        self._flush()
+
+    def set_daily_goal(self, difficulty: str, date: str | None = None, *,
+                       goal_type: str = "xp", custom_minutes: int | None = None) -> None:
+        today = date or datetime.now().strftime("%Y-%m-%d")
+
+        if goal_type == "time":
+            if difficulty == "custom":
+                if custom_minutes is None or custom_minutes < 5 or custom_minutes > 60:
+                    raise ValueError("custom_minutes must be between 5 and 60")
+                target = custom_minutes * 60
+            else:
+                target = TIME_GOAL_PRESETS[difficulty]
+            earned = self._data["timeHistory"].get(today, 0)
+        else:
+            target = DAILY_GOAL_PRESETS[difficulty]
+            earned = self._data["xpHistory"].get(today, 0)
+
         self._data["dailyGoals"][today] = {
             "target": target,
             "earned": earned,
             "difficulty": difficulty,
+            "type": goal_type,
         }
         self._recalc_streak(today)
         self._flush()

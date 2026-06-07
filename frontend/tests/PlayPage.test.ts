@@ -107,42 +107,6 @@ describe("PlayPage — select and play", () => {
   });
 });
 
-describe("PlayPage — tag filter", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("clicking a tag filters materials", async () => {
-    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
-    const wrapper = await mountPlay();
-
-    // Click the "科幻" tag.
-    const tags = wrapper.findAll(".tag");
-    const scifiTag = tags.find((t) => t.text() === "科幻");
-    expect(scifiTag).toBeTruthy();
-    await scifiTag!.trigger("click");
-    await flushPromises();
-
-    // Only "三体" should be visible.
-    const cards = wrapper.findAll(".material-card");
-    expect(cards).toHaveLength(1);
-    expect(cards[0].text()).toContain("三体");
-  });
-
-  it("clicking tag again clears filter", async () => {
-    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
-    const wrapper = await mountPlay();
-
-    const scifiTag = wrapper.findAll(".tag").find((t) => t.text() === "科幻");
-    await scifiTag!.trigger("click");
-    await flushPromises();
-
-    // Click again to clear.
-    await scifiTag!.trigger("click");
-    await flushPromises();
-
-    expect(wrapper.findAll(".material-card")).toHaveLength(2);
-  });
-});
-
 describe("PlayPage — URL fetch", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -283,25 +247,6 @@ describe("PlayPage — random selection", () => {
     expect(wrapper.find(".btn-random").exists()).toBe(false);
   });
 
-  it("hides random button when tag filter excludes all materials", async () => {
-    // Two materials with different tags, filter to one, then check button
-    // still visible. The real test: button must use filteredMaterials, not materials.
-    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
-    const wrapper = await mountPlay();
-
-    // Both materials visible, button visible
-    expect(wrapper.findAll(".material-card")).toHaveLength(2);
-    expect(wrapper.find(".btn-random").exists()).toBe(true);
-
-    // Filter to "科幻" — only "三体" matches, button still visible
-    const scifiTag = wrapper.findAll(".tag").find((t) => t.text() === "科幻");
-    await scifiTag!.trigger("click");
-    await flushPromises();
-
-    expect(wrapper.findAll(".material-card")).toHaveLength(1);
-    expect(wrapper.find(".btn-random").exists()).toBe(true);
-  });
-
   it("clicking random button starts a typing session", async () => {
     vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
     vi.mocked(getProgress).mockResolvedValue(null);
@@ -311,30 +256,7 @@ describe("PlayPage — random selection", () => {
     await wrapper.find(".btn-random").trigger("click");
     await flushPromises();
 
-    // Should have selected a material and show TypingSession
     expect(wrapper.findComponent({ name: "TypingSession" }).exists()).toBe(true);
-  });
-
-  it("random respects tag filter", async () => {
-    vi.mocked(listMaterials).mockResolvedValue(MOCK_MATERIALS);
-    vi.mocked(getProgress).mockResolvedValue(null);
-
-    const wrapper = await mountPlay();
-
-    // Filter to "科幻" — only "三体" should be selectable
-    const scifiTag = wrapper.findAll(".tag").find((t) => t.text() === "科幻");
-    await scifiTag!.trigger("click");
-    await flushPromises();
-
-    await wrapper.find(".btn-random").trigger("click");
-    await flushPromises();
-
-    // The active material must be "三体" (id: mat2), not "小王子" (id: mat1)
-    const session = wrapper.findComponent({ name: "TypingSession" });
-    expect(session.exists()).toBe(true);
-    // Verify the selected material is "三体" by checking its segments
-    const segments = session.props("segments");
-    expect(segments[0].content).toBe("宇宙很大，生活更大。");
   });
 });
 

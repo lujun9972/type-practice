@@ -1,15 +1,18 @@
 <template>
   <div class="typing-session">
-    <VideoPlayer
-      v-if="videoUrl"
-      ref="videoPlayerRef"
-      :videoUrl="videoSrc"
-      :startTimeMs="currentStartTimeMs"
-      :nextStartTimeMs="currentNextStartTimeMs"
-      @buffered="onVideoBuffered"
-      @segmentPlaybackComplete="onSegmentPlaybackComplete"
-    />
-    <div v-if="videoUrl && videoBuffering" class="video-buffering">视频加载中...</div>
+    <div v-if="videoUrl" class="video-sticky-wrapper" :class="{ collapsed: videoCollapsed }">
+      <VideoPlayer
+        ref="videoPlayerRef"
+        :videoUrl="videoSrc"
+        :playUntilMs="currentPlayUntilMs"
+        :playFromStart="videoPlayFromStart"
+        @buffered="onVideoBuffered"
+        @reachedTarget="onReachedTarget"
+      />
+      <div v-if="videoBuffering" class="video-buffering">视频加载中...</div>
+      <button class="btn-collapse-video" @click="toggleVideoCollapse">▼ 收起</button>
+    </div>
+    <button v-if="videoUrl && videoCollapsed" class="btn-expand-video" @click="toggleVideoCollapse">▲ 展开视频</button>
     <template v-if="!videoUrl || !videoBuffering">
       <template v-for="(node, i) in visibleNodes" :key="i">
         <div v-if="node.type === 'text'" class="segment-wrapper">
@@ -74,8 +77,8 @@ const hintText = ref("");
 const isFinished = ref(false);
 const startTime = ref(Date.now());
 const videoBuffering = ref(true);
+const videoCollapsed = ref(false);
 const videoPlayerRef = ref<InstanceType<typeof VideoPlayer> | null>(null);
-const pendingPlayback = ref<number | null>(null);
 
 const videoSrc = computed(() => props.videoUrl ? `/api/videos/${props.videoUrl}` : "");
 
@@ -83,8 +86,10 @@ const textSegments = computed(() =>
   props.segments.filter((s) => s.type === "text"),
 );
 
-const currentStartTimeMs = ref<number | null>(null);
-const currentNextStartTimeMs = ref<number | null>(null);
+const currentPlayUntilMs = ref<number | null>(null);
+const videoPlayFromStart = ref(false);
+const pendingAdvance = ref(false);
+const pendingTargetMs = ref<number | null>(null);
 
 /**
  * Visible nodes = all segments (text + image) up to and including
@@ -152,10 +157,15 @@ function triggerVideoPlayback(textIndex: number) {
   if (!seg || seg.startTimeMs === undefined) return;
 
   const nextSeg = textSegments.value[textIndex + 1];
-  const nextStart = nextSeg?.startTimeMs ?? null;
+  const targetMs = nextSeg?.endTimeMs ?? null;
 
-  currentStartTimeMs.value = seg.startTimeMs;
-  currentNextStartTimeMs.value = nextStart;
+  if (currentPlayUntilMs.value !== null && currentPlayUntilMs.value !== targetMs) {
+    pendingAdvance.value = true;
+    pendingTargetMs.value = targetMs;
+    return;
+  }
+
+  currentPlayUntilMs.value = targetMs;
 }
 
 function onVideoBuffered() {
@@ -165,11 +175,24 @@ function onVideoBuffered() {
     if (seg?.startTimeMs !== undefined && videoPlayerRef.value) {
       videoPlayerRef.value.seekTo(seg.startTimeMs);
     }
+    currentPlayUntilMs.value = seg?.endTimeMs ?? null;
+  } else if (props.videoUrl) {
+    const firstSeg = textSegments.value.find((s) => s.startTimeMs !== undefined);
+    if (firstSeg && firstSeg.startTimeMs !== undefined) {
+      videoPlayFromStart.value = true;
+      currentPlayUntilMs.value = firstSeg.startTimeMs;
+    }
   }
 }
 
-function onSegmentPlaybackComplete() {
-  // Video finished playing the current segment fragment; no action needed.
+function onReachedTarget() {
+  videoPlayFromStart.value = false;
+  currentPlayUntilMs.value = null;
+  if (pendingAdvance.value) {
+    currentPlayUntilMs.value = pendingTargetMs.value;
+    pendingAdvance.value = false;
+    pendingTargetMs.value = null;
+  }
 }
 
 // Result calculations
@@ -221,6 +244,10 @@ function onSkip() {
   if (!seg) return;
   seg.skip();
   skipRemaining.value--;
+}
+
+function toggleVideoCollapse() {
+  videoCollapsed.value = !videoCollapsed.value;
 }
 </script>
 
@@ -298,5 +325,60 @@ function onSkip() {
   text-align: center;
   padding: 2rem;
   color: #aaa;
+}
+
+.video-sticky-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  transition: max-height 0.3s ease, margin-bottom 0.3s ease;
+}
+
+.video-sticky-wrapper.collapsed {
+  max-height: 0 !important;
+  margin-bottom: 0;
+}
+
+.btn-collapse-video {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.8rem;
+  background: #111;
+  border: none;
+  border-top: 1px solid #333;
+  color: #888;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: center;
+}
+
+.btn-collapse-video:hover {
+  color: #ccc;
+  background: #1a1a2e;
+}
+
+.btn-expand-video {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.8rem;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #93c5fd;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-bottom: 0.5rem;
+}
+
+.btn-expand-video:hover {
+  background: #224478;
 }
 </style>

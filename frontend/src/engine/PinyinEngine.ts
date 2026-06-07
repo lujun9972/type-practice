@@ -38,7 +38,7 @@ export class PinyinEngine {
       return {
         display: char,
         pinyin: pinyinWithTone,
-        matchPinyin: pinyinNoTone.toLowerCase(),
+        matchPinyin: pinyinNoTone.toLowerCase().replace(/ü/g, "v"),
         status: "pending",
         typedCount: 0,
       };

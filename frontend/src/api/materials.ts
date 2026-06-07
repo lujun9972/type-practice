@@ -61,10 +61,14 @@ export async function updateMaterial(
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
-  await fetch(`${API_BASE}/materials/${id}`, {
+  const res = await fetch(`${API_BASE}/materials/${id}`, {
     method: "DELETE",
     headers: authHeader(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Delete failed (${res.status})`);
+  }
 }
 
 export async function previewSegments(content: string): Promise<Segment[]> {

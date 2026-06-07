@@ -60,6 +60,59 @@ class TestSetDailyGoal:
         assert response.status_code == 422
 
 
+class TestSetTimeGoal:
+    def test_set_time_goal_easy(self):
+        response = client.post("/api/stats/daily-goal", json={"difficulty": "easy", "goal_type": "time"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["goalType"] == "time"
+        assert body["todayTarget"] == 300
+
+    def test_set_time_goal_custom(self):
+        response = client.post("/api/stats/daily-goal", json={"difficulty": "custom", "goal_type": "time", "custom_minutes": 25})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["todayTarget"] == 1500
+
+    def test_set_xp_goal_still_works_without_goal_type(self):
+        response = client.post("/api/stats/daily-goal", json={"difficulty": "normal"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["goalType"] == "xp"
+        assert body["todayTarget"] == 150
+
+
+class TestTimeAccumulationViaProgress:
+    def _create_material(self):
+        return client.post(
+            "/api/materials",
+            json={
+                "title": "测试素材",
+                "tags": "test",
+                "content": "第一段。第二段。",
+            },
+        ).json()
+
+    def test_save_progress_accumulates_time(self):
+        client.post("/api/stats/daily-goal", json={"difficulty": "easy", "goal_type": "time"})
+        material = self._create_material()
+        client.put(
+            f"/api/progress/{material['id']}",
+            json={
+                "materialId": material["id"],
+                "completedSegments": [0],
+                "segmentResults": [
+                    {"index": 0, "accuracy": 100, "timeMs": 120000, "correctChars": 3}
+                ],
+                "currentSegmentIndex": 1,
+                "isComplete": False,
+            },
+        )
+        stats = client.get("/api/stats").json()
+        assert stats["todayEarned"] == 120  # 120000ms = 120s
+        assert stats["todayTimeEarned"] == 120
+
+
 class TestUseRepair:
     def test_use_repair_with_no_items_fails(self):
         response = client.post("/api/stats/repair", json={"date": "2026-06-01"})

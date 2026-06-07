@@ -6,19 +6,7 @@
     <div v-if="error" class="error-banner">{{ error }}</div>
 
     <!-- Auth gate -->
-    <div v-if="!authenticated" class="auth-form-wrapper">
-      <form class="auth-form" @submit.prevent="onAuthSubmit">
-        <label>{{ passwordSet ? "输入密码" : "设置密码" }}</label>
-        <input
-          name="auth-password"
-          type="password"
-          v-model="authPassword"
-          :placeholder="passwordSet ? '密码' : '设置管理密码'"
-          required
-        />
-        <button type="submit">{{ passwordSet ? "确认" : "设置" }}</button>
-      </form>
-    </div>
+    <AuthGate ref="authGateRef" @authenticated="onAuthenticated" @error="(msg: string) => { error = msg }" />
 
     <template v-if="authenticated">
     <!-- Detail view -->
@@ -38,7 +26,12 @@
       </div>
       <div class="detail-actions">
         <button class="btn-edit" @click="onEdit(detailMaterial)">编辑</button>
-        <button class="btn-delete" @click="onDelete(detailMaterial.id)">删除</button>
+        <button v-if="pendingDeleteId !== detailMaterial.id" class="btn-delete" @click="requestDelete(detailMaterial.id)">删除</button>
+        <template v-else>
+          <span class="confirm-hint">确定删除？</span>
+          <button class="btn-confirm-action" @click="confirmDelete">确定</button>
+          <button class="btn-cancel-action" @click="cancelDelete">取消</button>
+        </template>
       </div>
     </div>
 
@@ -72,21 +65,27 @@
     <!-- Material list -->
     <div v-else>
       <div v-if="materials.length === 0 && !loading" class="empty">暂无素材</div>
-      <div v-else class="material-list">
-        <div v-for="mat in materials" :key="mat.id" class="material-item" @click="onView(mat)">
+      <MaterialBrowser
+        v-else
+        :materials="materials"
+        @select="onView"
+      >
+        <template #card-actions="{ material }">
           <input
             v-if="showExportPanel && exportMode === 'ids'"
             type="checkbox"
-            :value="mat.id"
+            :value="material.id"
             v-model="exportSelectedIds"
             @click.stop
             class="export-checkbox"
           />
-          <span class="title">{{ mat.title }}</span>
-          <span v-for="tag in mat.tags" :key="tag" class="tag">{{ tag }}</span>
-          <button class="btn-delete" @click.stop="onDelete(mat.id)">删除</button>
-        </div>
-      </div>
+          <button v-if="pendingDeleteId !== material.id" class="btn-delete" @click.stop="requestDelete(material.id)">删除</button>
+          <template v-else>
+            <button class="btn-confirm-action" @click.stop="confirmDelete">确定删除</button>
+            <button class="btn-cancel-action" @click.stop="cancelDelete">取消</button>
+          </template>
+        </template>
+      </MaterialBrowser>
     </div>
 
     <!-- Export / Import controls -->
@@ -144,23 +143,25 @@
         />
       </div>
 
-      <!-- Import summary -->
       <div v-if="importSummary" class="import-summary">
         {{ importSummary }}
       </div>
 
-      <!-- Missing video re-upload prompts -->
       <div v-if="importMissingVideos.length > 0" class="missing-videos-panel">
         <h4>视频素材需要重新上传</h4>
         <p class="missing-videos-hint">以下素材关联的视频文件未包含在导入中，请上传视频文件或跳过。</p>
         <div v-for="mat in importMissingVideos" :key="mat.id" class="missing-video-row">
           <span class="missing-video-title">{{ mat.title }} <small>({{ mat.videoUrl }})</small></span>
-          <input
-            type="file"
-            accept="video/*"
-            @change="(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) onReuploadVideo(mat, f); }"
-            :disabled="loading"
-          />
+          <div class="file-input-wrapper-sm">
+            <input
+              type="file"
+              accept="video/*"
+              @change="(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) onReuploadVideo(mat, f); (e.target as HTMLInputElement).value = ''; }"
+              :disabled="loading"
+              class="file-input-overlay"
+            />
+            <span class="file-select-btn file-select-btn-sm">选择视频文件</span>
+          </div>
           <button type="button" class="btn-skip-reupload" @click="onSkipReupload(mat)">跳过</button>
         </div>
       </div>
@@ -204,92 +205,10 @@
     </div>
 
     <!-- Text create form -->
-    <form v-if="createMode === 'text'" class="create-form" @submit.prevent="onCreate">
-      <div>
-        <label>标题</label>
-        <input name="title" v-model="form.title" required />
-      </div>
-      <div>
-        <label>标签（逗号分隔）</label>
-        <input name="tags" v-model="form.tags" />
-      </div>
-      <div>
-        <label>内容</label>
-        <textarea name="content" v-model="form.content" rows="4" required></textarea>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="preview-btn" @click="onPreview" :disabled="loading">
-          {{ loading ? "加载中..." : "预览分段" }}
-        </button>
-        <button type="submit" :disabled="loading">
-          {{ loading ? "创建中..." : "创建" }}
-        </button>
-      </div>
-    </form>
+    <TextMaterialForm v-if="createMode === 'text'" @created="onCreated" @error="(msg: string) => { error = msg }" />
 
     <!-- Video create form -->
-    <form v-if="createMode === 'video'" class="create-form" @submit.prevent="onCreateVideo">
-      <div>
-        <label>标题</label>
-        <input name="video-title" v-model="form.title" required />
-      </div>
-      <div>
-        <label>标签（逗号分隔）</label>
-        <input name="video-tags" v-model="form.tags" />
-      </div>
-      <div>
-        <label>视频文件</label>
-        <input
-          type="file"
-          accept="video/*"
-          @change="onVideoFileSelect"
-          :disabled="loading"
-          required
-        />
-      </div>
-      <div>
-        <label>字幕文件（SRT / VTT）</label>
-        <input
-          type="file"
-          accept=".srt,.vtt"
-          @change="onSubtitleFileSelect"
-          :disabled="loading"
-          required
-        />
-      </div>
-      <div v-if="videoConflictMsg" class="conflict-warning">
-        {{ videoConflictMsg }}
-        <button type="button" @click="videoConflictMsg = ''">取消</button>
-        <button type="button" @click="onCreateVideo(true)">覆盖</button>
-      </div>
-      <div class="form-actions">
-        <button type="submit" :disabled="loading || !videoFile || !subtitleFile">
-          {{ loading ? "上传中..." : "上传并创建" }}
-        </button>
-      </div>
-    </form>
-
-    <!-- Video subtitle preview with editing -->
-    <div v-if="videoParsedSegments.length > 0 && createMode === 'video'" class="segment-preview">
-      <h3>字幕预览（{{ videoParsedSegments.length }} 条）</h3>
-      <div v-for="(seg, i) in videoParsedSegments" :key="i" class="preview-segment video-segment">
-        <span class="segment-time">{{ formatMs(seg.startTimeMs) }} → {{ formatMs(seg.endTimeMs) }}</span>
-        <input
-          class="segment-edit-input"
-          :value="seg.content"
-          @input="(e) => onEditSubtitleSegment(i, e.target.value)"
-        />
-        <button type="button" class="btn-remove-segment" @click="onRemoveSubtitleSegment(i)">删除</button>
-      </div>
-    </div>
-
-    <!-- Segment preview -->
-    <div v-if="previewData.length > 0" class="segment-preview">
-      <h3>分段预览（{{ previewData.length }} 段）</h3>
-      <div v-for="(seg, i) in previewData" :key="i" class="preview-segment">
-        {{ seg.content }}
-      </div>
-    </div>
+    <VideoMaterialForm v-if="createMode === 'video'" @created="onCreated" @error="(msg: string) => { error = msg }" />
 
     <!-- URL fetch -->
     <h2>URL 抓取</h2>
@@ -323,90 +242,48 @@
     </form>
 
     <!-- Fetch/generate preview -->
-    <div v-if="previewMaterial" class="fetch-preview">
-      <h3>预览</h3>
-      <div class="preview-fields">
-        <div>
-          <label>标题</label>
-          <input name="preview-title" v-model="previewForm.title" />
-        </div>
-        <div>
-          <label>标签（逗号分隔）</label>
-          <input name="preview-tags" v-model="previewForm.tags" />
-        </div>
-      </div>
-      <div class="preview-content">{{ previewMaterial.content }}</div>
-      <div class="preview-segs">
-        <div v-for="(seg, i) in previewMaterial.segments" :key="i" class="preview-segment">
-          {{ seg.content }}
-        </div>
-      </div>
-      <div class="preview-actions">
-        <button class="btn-save-preview" @click="onSavePreview" :disabled="loading">
-          {{ loading ? "保存中..." : "保存到素材库" }}
-        </button>
-        <button class="btn-discard-preview" @click="previewMaterial = null">丢弃</button>
-      </div>
-    </div>
+    <MaterialPreview
+      v-if="previewMaterial"
+      :material="previewMaterial"
+      @saved="onSavePreview"
+      @discard="previewMaterial = null"
+      @error="(msg: string) => { error = msg }"
+    />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed } from "vue";
 import {
   listMaterials,
-  createMaterial,
   deleteMaterial,
   updateMaterial,
   fetchUrl,
   fetchTopic,
-  previewSegments as previewSplit,
-  getAuthStatus,
-  authSetup,
-  authLogin,
-  setToken,
-  clearToken,
-  getToken,
   exportMaterials,
   importMaterials,
   importResolve,
+  getToken,
+  clearToken,
 } from "@/api/materials";
-import type { Material, Segment, ExportRequest, ImportConflict } from "@/api/materials";
+import type { Material, ExportRequest, ImportConflict } from "@/api/materials";
+import MaterialBrowser from "@/components/MaterialBrowser.vue";
+import AuthGate from "@/components/admin/AuthGate.vue";
+import TextMaterialForm from "@/components/admin/TextMaterialForm.vue";
+import VideoMaterialForm from "@/components/admin/VideoMaterialForm.vue";
+import MaterialPreview from "@/components/admin/MaterialPreview.vue";
 
 const materials = ref<Material[]>([]);
-const previewData = ref<Segment[]>([]);
 const loading = ref(false);
 const error = ref("");
 const detailMaterial = ref<Material | null>(null);
 const editingMaterial = ref<Material | null>(null);
 const editForm = reactive({ title: "", tags: "", content: "" });
-
-const editHasImages = computed(() =>
-  editingMaterial.value?.segments.some((s) => s.type === "image") ?? false,
-);
-
-function handleAuthError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  if (msg.includes("Invalid token") || msg.includes("Not authenticated")) {
-    clearToken();
-    authenticated.value = false;
-  }
-  return msg;
-}
-
-const form = reactive({
-  title: "",
-  tags: "",
-  content: "",
-});
-
+const authenticated = ref(false);
+const authGateRef = ref<InstanceType<typeof AuthGate> | null>(null);
+const pendingDeleteId = ref<string | null>(null);
 const createMode = ref<"text" | "video">("text");
-const videoFile = ref<File | null>(null);
-const subtitleFile = ref<File | null>(null);
-const videoParsedSegments = ref<Segment[]>([]);
-const videoConflictMsg = ref("");
-
 const urlInput = ref("");
 const topicInput = ref("");
 const topicLang = ref("zh");
@@ -414,10 +291,6 @@ const topicAuto = ref(true);
 const topicMin = ref<number | undefined>(undefined);
 const topicMax = ref<number | undefined>(undefined);
 const previewMaterial = ref<Material | null>(null);
-const previewForm = reactive({ title: "", tags: "" });
-const passwordSet = ref(false);
-const authenticated = ref(false);
-const authPassword = ref("");
 
 // ── Export state ──
 const exportMode = ref<"all" | "tags" | "ids">("all");
@@ -437,6 +310,27 @@ const importTotal = ref(0);
 const importSummary = ref<string | null>(null);
 const importMissingVideos = ref<Material[]>([]);
 
+const editHasImages = computed(() =>
+  editingMaterial.value?.segments.some((s) => s.type === "image") ?? false,
+);
+
+const allTags = computed(() => {
+  const tagSet = new Set<string>();
+  for (const m of materials.value) {
+    for (const t of m.tags) tagSet.add(t);
+  }
+  return Array.from(tagSet).sort();
+});
+
+function handleAuthError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes("Invalid token") || msg.includes("Not authenticated")) {
+    clearToken();
+    authenticated.value = false;
+  }
+  return msg;
+}
+
 async function refresh() {
   try {
     error.value = "";
@@ -446,38 +340,12 @@ async function refresh() {
   }
 }
 
-onMounted(async () => {
-  const existingToken = getToken();
-  if (existingToken) {
-    authenticated.value = true;
-  }
-  const status = await getAuthStatus();
-  passwordSet.value = status.passwordSet;
-  if (authenticated.value) {
-    await refresh();
-  }
-});
-
-async function onAuthSubmit() {
-  if (!authPassword.value) return;
-  try {
-    error.value = "";
-    let result: { token: string };
-    if (passwordSet.value) {
-      result = await authLogin(authPassword.value);
-    } else {
-      result = await authSetup(authPassword.value);
-    }
-    setToken(result.token);
-    authenticated.value = true;
-    authPassword.value = "";
-    await refresh();
-  } catch (e) {
-    error.value = "认证失败：" + (e instanceof Error ? e.message : String(e));
-  }
+function onAuthenticated() {
+  authenticated.value = true;
+  refresh();
 }
 
-function onView(mat: Material) {
+async function onView(mat: Material) {
   detailMaterial.value = mat;
 }
 
@@ -514,125 +382,22 @@ async function onSaveEdit() {
   }
 }
 
-async function onCreate() {
-  try {
-    loading.value = true;
-    error.value = "";
-    await createMaterial({
-      title: form.title,
-      tags: form.tags,
-      content: form.content,
-    });
-    form.title = "";
-    form.tags = "";
-    form.content = "";
-    previewData.value = [];
-    await refresh();
-  } catch (e) {
-    error.value = "创建失败：" + handleAuthError(e);
-  } finally {
-    loading.value = false;
-  }
+async function onCreated() {
+  await refresh();
 }
 
-async function onPreview() {
-  if (!form.content) return;
-  try {
-    loading.value = true;
-    error.value = "";
-    previewData.value = await previewSplit(form.content);
-  } catch (e) {
-    error.value = "预览失败：" + handleAuthError(e);
-  } finally {
-    loading.value = false;
-  }
+function requestDelete(id: string) {
+  pendingDeleteId.value = id;
 }
 
-function onVideoFileSelect(e: Event) {
-  const target = e.target as HTMLInputElement;
-  videoFile.value = target.files?.[0] ?? null;
-  videoConflictMsg.value = "";
+function cancelDelete() {
+  pendingDeleteId.value = null;
 }
 
-function onSubtitleFileSelect(e: Event) {
-  const target = e.target as HTMLInputElement;
-  subtitleFile.value = target.files?.[0] ?? null;
-  videoParsedSegments.value = [];
-}
-
-function onRemoveSubtitleSegment(index: number) {
-  videoParsedSegments.value.splice(index, 1);
-}
-
-function onEditSubtitleSegment(index: number, value: string) {
-  videoParsedSegments.value[index] = { ...videoParsedSegments.value[index], content: value };
-}
-
-function formatMs(ms?: number): string {
-  if (ms === undefined || ms === null) return "--:--";
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-async function onCreateVideo(overwrite = false) {
-  if (!videoFile.value || !subtitleFile.value) return;
-  try {
-    loading.value = true;
-    error.value = "";
-    videoConflictMsg.value = "";
-    const formData = new FormData();
-    formData.append("video", videoFile.value);
-    formData.append("subtitle", subtitleFile.value);
-    formData.append("title", form.title);
-    formData.append("tags", form.tags);
-
-    const query = overwrite ? "?overwrite=true" : "";
-    const res = await fetch(`/api/materials/video${query}`, {
-      method: "POST",
-      headers: { ...authHeader() },
-      body: formData,
-    });
-
-    if (res.status === 409) {
-      const body = await res.json();
-      videoConflictMsg.value = body.detail || "文件已存在，是否覆盖？";
-      return;
-    }
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `上传失败 (${res.status})`);
-    }
-
-    const material = await res.json();
-    videoParsedSegments.value = material.segments || [];
-    form.title = "";
-    form.tags = "";
-    videoFile.value = null;
-    subtitleFile.value = null;
-    videoConflictMsg.value = "";
-    await refresh();
-  } catch (e) {
-    error.value = "视频上传失败：" + handleAuthError(e);
-  } finally {
-    loading.value = false;
-  }
-}
-
-function authHeader(): Record<string, string> {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function onDelete(id: string) {
-  const mat = materials.value.find((m) => m.id === id);
-  const hasVideo = mat?.videoUrl;
-  const msg = hasVideo
-    ? "确定删除此素材？关联的视频文件也将一并删除。"
-    : "确定删除此素材？";
-  if (!window.confirm(msg)) return;
+async function confirmDelete() {
+  const id = pendingDeleteId.value;
+  if (!id) return;
+  pendingDeleteId.value = null;
   try {
     error.value = "";
     await deleteMaterial(id);
@@ -652,8 +417,6 @@ async function onFetchUrl() {
     error.value = "";
     const mat = await fetchUrl(urlInput.value);
     previewMaterial.value = mat;
-    previewForm.title = mat.title;
-    previewForm.tags = mat.tags.join(", ");
   } catch (e) {
     error.value = "抓取失败：" + handleAuthError(e);
   } finally {
@@ -661,14 +424,32 @@ async function onFetchUrl() {
   }
 }
 
-// ── Computed ──
-const allTags = computed(() => {
-  const tagSet = new Set<string>();
-  for (const m of materials.value) {
-    for (const t of m.tags) tagSet.add(t);
+async function onGenerate() {
+  if (!topicInput.value) return;
+  try {
+    loading.value = true;
+    error.value = "";
+    const mat = await fetchTopic(topicInput.value, {
+      language: topicLang.value,
+      lengthAuto: topicAuto.value,
+      lengthMin: topicMin.value,
+      lengthMax: topicMax.value,
+    });
+    previewMaterial.value = mat;
+  } catch (e) {
+    error.value = "生成失败：" + handleAuthError(e);
+  } finally {
+    loading.value = false;
   }
-  return Array.from(tagSet).sort();
-});
+}
+
+async function onSavePreview() {
+  // Handled by MaterialPreview component — just clear and refresh
+  previewMaterial.value = null;
+  urlInput.value = "";
+  topicInput.value = "";
+  await refresh();
+}
 
 // ── Export methods ──
 async function onExport() {
@@ -682,7 +463,6 @@ async function onExport() {
       req.ids = exportSelectedIds.value;
     }
     const data = await exportMaterials(req);
-    // Trigger download
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -729,7 +509,6 @@ async function handleImportFile(file: File) {
     importCurrentConflictIdx.value = 0;
 
     if (result.conflicts.length === 0) {
-      // No conflicts — auto-resolve
       await doImportResolve();
     }
   } catch (e) {
@@ -768,9 +547,10 @@ async function onReuploadVideo(mat: Material, file: File) {
     error.value = "";
     const formData = new FormData();
     formData.append("video", file);
+    const token = getToken();
     const res = await fetch(`/api/materials/${mat.id}/video`, {
       method: "POST",
-      headers: { ...authHeader() },
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
     if (!res.ok) {
@@ -788,49 +568,6 @@ async function onReuploadVideo(mat: Material, file: File) {
 
 function onSkipReupload(mat: Material) {
   importMissingVideos.value = importMissingVideos.value.filter((m) => m.id !== mat.id);
-}
-
-async function onGenerate() {
-  if (!topicInput.value) return;
-  try {
-    loading.value = true;
-    error.value = "";
-    const mat = await fetchTopic(topicInput.value, {
-      language: topicLang.value,
-      lengthAuto: topicAuto.value,
-      lengthMin: topicMin.value,
-      lengthMax: topicMax.value,
-    });
-    previewMaterial.value = mat;
-    previewForm.title = mat.title;
-    previewForm.tags = mat.tags.join(", ");
-  } catch (e) {
-    error.value = "生成失败：" + handleAuthError(e);
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function onSavePreview() {
-  if (!previewMaterial.value) return;
-  try {
-    loading.value = true;
-    error.value = "";
-    await createMaterial({
-      title: previewForm.title,
-      tags: previewForm.tags,
-      content: previewMaterial.value.content,
-      segments: previewMaterial.value.segments,
-    });
-    previewMaterial.value = null;
-    urlInput.value = "";
-    topicInput.value = "";
-    await refresh();
-  } catch (e) {
-    error.value = "保存失败：" + handleAuthError(e);
-  } finally {
-    loading.value = false;
-  }
 }
 </script>
 
@@ -853,25 +590,6 @@ h1, h2 {
   padding: 2rem;
 }
 
-.material-item {
-  padding: 0.75rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-  margin-bottom: 0.5rem;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  cursor: pointer;
-}
-
-.material-item:hover {
-  border-color: #3b82f6;
-}
-
-.title {
-  font-weight: bold;
-}
-
 .tag {
   padding: 0.15rem 0.5rem;
   background: #2a2a4a;
@@ -887,6 +605,32 @@ h1, h2 {
   border: none;
   border-radius: 4px;
   color: #fca5a5;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.confirm-hint {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  margin-right: 0.3rem;
+}
+
+.btn-confirm-action {
+  padding: 0.2rem 0.6rem;
+  background: #7f1d1d;
+  border: none;
+  border-radius: 4px;
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-cancel-action {
+  padding: 0.2rem 0.6rem;
+  background: #444;
+  border: 1px solid #666;
+  border-radius: 4px;
+  color: #ccc;
   cursor: pointer;
   font-size: 0.8rem;
 }
@@ -951,11 +695,10 @@ h1, h2 {
   cursor: pointer;
 }
 
-form.create-form {
+form.edit-form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  margin-top: 1rem;
 }
 
 form label {
@@ -996,23 +739,45 @@ form input, form textarea {
   cursor: not-allowed;
 }
 
-.segment-preview {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #1e293b;
-  border-radius: 8px;
-}
-
-.segment-preview h3 {
-  margin-top: 0;
-  color: #93c5fd;
-}
-
 .preview-segment {
   padding: 0.5rem;
   border-left: 3px solid #3b82f6;
   margin-bottom: 0.5rem;
   color: #ddd;
+}
+
+.edit-content-readonly {
+  padding: 0.5rem;
+  background: #111827;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #999;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* ── Create mode toggle ── */
+.create-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.create-mode-toggle button {
+  padding: 0.5rem 1.2rem;
+  background: #1e293b;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.15s;
+}
+
+.create-mode-toggle button.active {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+  color: #93c5fd;
 }
 
 .url-fetch-form,
@@ -1083,130 +848,6 @@ form input, form textarea {
 
 .length-sep {
   color: #888;
-}
-
-.fetch-preview {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #1e293b;
-  border: 1px solid #3b82f6;
-  border-radius: 8px;
-}
-
-.fetch-preview h3 {
-  margin-top: 0;
-  color: #93c5fd;
-}
-
-.preview-fields {
-  margin-bottom: 1rem;
-}
-
-.preview-fields label {
-  display: block;
-  font-size: 0.85rem;
-  color: #aaa;
-  margin-bottom: 0.2rem;
-}
-
-.preview-fields input {
-  width: 100%;
-  padding: 0.4rem;
-  background: #2a2a4a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #eee;
-  font-size: 1rem;
-  box-sizing: border-box;
-  margin-bottom: 0.5rem;
-}
-
-.preview-content {
-  padding: 0.75rem;
-  background: #111827;
-  border-radius: 6px;
-  margin-bottom: 0.75rem;
-  color: #ddd;
-  line-height: 1.6;
-  max-height: 200px;
-  overflow-y: auto;
-  white-space: pre-line;
-}
-
-.preview-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.btn-save-preview {
-  padding: 0.5rem 1rem;
-  background: #14532d;
-  border: 1px solid #22c55e;
-  border-radius: 6px;
-  color: #86efac;
-  cursor: pointer;
-}
-
-.btn-save-preview:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-discard-preview {
-  padding: 0.5rem 1rem;
-  background: #7f1d1d;
-  border: none;
-  border-radius: 6px;
-  color: #fca5a5;
-  cursor: pointer;
-}
-
-.edit-content-readonly {
-  padding: 0.5rem;
-  background: #111827;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #999;
-  line-height: 1.6;
-  white-space: pre-line;
-}
-
-.auth-form-wrapper {
-  display: flex;
-  justify-content: center;
-  padding: 3rem 0;
-}
-
-.auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 280px;
-}
-
-.auth-form label {
-  font-size: 1.1rem;
-  font-weight: bold;
-  text-align: center;
-}
-
-.auth-form input {
-  padding: 0.5rem;
-  background: #2a2a4a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #eee;
-  font-size: 1rem;
-}
-
-.auth-form button {
-  padding: 0.5rem 1rem;
-  background: #1e3a5f;
-  border: 1px solid #3b82f6;
-  border-radius: 6px;
-  color: #93c5fd;
-  cursor: pointer;
 }
 
 /* ── Export / Import ── */
@@ -1431,94 +1072,61 @@ form input, form textarea {
   cursor: pointer;
 }
 
-/* ── Create mode toggle ── */
-.create-mode-toggle {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+/* ── File input overlay ── */
+.file-input-wrapper-sm {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
 }
 
-.create-mode-toggle button {
-  padding: 0.5rem 1.2rem;
-  background: #1e293b;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #aaa;
+.file-input-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
   cursor: pointer;
-  font-size: 0.95rem;
-  transition: all 0.15s;
+  z-index: 1;
+  font-size: 0;
 }
 
-.create-mode-toggle button.active {
-  background: #1e3a5f;
-  border-color: #3b82f6;
-  color: #93c5fd;
+.file-input-overlay:disabled {
+  cursor: not-allowed;
 }
 
-/* ── Video segment preview ── */
-.video-segment {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: nowrap;
-}
-
-.segment-time {
-  font-size: 0.8rem;
-  color: #93c5fd;
-  white-space: nowrap;
-  min-width: 6rem;
-}
-
-.segment-edit-input {
-  flex: 1;
-  padding: 0.3rem 0.5rem;
+.file-select-btn {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
   background: #2a2a4a;
   border: 1px solid #444;
-  border-radius: 4px;
-  color: #eee;
-  font-size: 0.9rem;
-}
-
-.btn-remove-segment {
-  padding: 0.25rem 0.6rem;
-  background: #7f1d1d;
-  border: none;
-  border-radius: 4px;
-  color: #fca5a5;
-  cursor: pointer;
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
-.conflict-warning {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: #78350f;
-  border: 1px solid #f59e0b;
   border-radius: 6px;
-  color: #fde68a;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.conflict-warning button {
-  padding: 0.3rem 0.8rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.conflict-warning button:first-of-type {
-  background: #444;
-  border: 1px solid #666;
   color: #ccc;
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+  transition: border-color 0.15s, background 0.15s;
+  pointer-events: none;
 }
 
-.conflict-warning button:last-of-type {
-  background: #7f1d1d;
-  border: 1px solid #f87171;
-  color: #fca5a5;
+.file-input-wrapper-sm:hover .file-select-btn {
+  border-color: #3b82f6;
+  background: #2e2e5a;
+}
+
+.file-input-overlay:disabled + .file-select-btn {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-select-btn-sm {
+  width: auto;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
 }
 </style>

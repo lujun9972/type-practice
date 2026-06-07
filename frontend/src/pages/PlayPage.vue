@@ -61,30 +61,14 @@
         </button>
       </form>
 
-      <div v-if="activeTag" class="active-filter">
-        筛选：<span class="tag active" @click="clearFilter">{{ activeTag }} ✕</span>
-      </div>
       <div v-if="error" class="error-banner">{{ error }}</div>
-      <button v-if="filteredMaterials.length > 0" class="btn-random" @click="onRandom">🎲 随机练习</button>
-      <div class="material-cards">
-        <div
-          v-for="mat in filteredMaterials"
-          :key="mat.id"
-          class="material-card"
-          @click="onSelect(mat)"
-        >
-          <h3>{{ mat.title }}</h3>
-          <div class="tags">
-            <span
-              v-for="tag in mat.tags"
-              :key="tag"
-              class="tag"
-              :class="{ active: tag === activeTag }"
-              @click.stop="onTagClick(tag)"
-            >{{ tag }}</span>
-          </div>
-        </div>
-      </div>
+      <KeepAlive>
+        <MaterialBrowser
+          :materials="materials"
+          :show-random-button="true"
+          @select="onSelect"
+        />
+      </KeepAlive>
     </div>
 
     <!-- Progress prompt -->
@@ -126,10 +110,10 @@ import { ref, computed, onMounted } from "vue";
 import { listMaterials, getMaterial, fetchUrl, fetchTopic, getProgress, saveProgress, deleteProgress, getConfig } from "@/api/materials";
 import type { Material, Progress } from "@/api/materials";
 import TypingSession from "@/components/TypingSession.vue";
+import MaterialBrowser from "@/components/MaterialBrowser.vue";
 
 const materials = ref<Material[]>([]);
 const activeMaterial = ref<Material | null>(null);
-const activeTag = ref("");
 const urlInput = ref("");
 const typingMode = ref<"typing" | "pinyin">("typing");
 const fetching = ref(false);
@@ -152,11 +136,6 @@ const totalXpEarned = computed(() =>
   segmentResults.value.reduce((sum, r) => sum + r.correctChars, 0),
 );
 
-const filteredMaterials = computed(() => {
-  if (!activeTag.value) return materials.value;
-  return materials.value.filter((m) => m.tags.includes(activeTag.value));
-});
-
 const startIndex = computed(() => {
   return savedProgress.value?.currentSegmentIndex ?? 0;
 });
@@ -176,14 +155,6 @@ async function refresh() {
 }
 
 onMounted(refresh);
-
-function onTagClick(tag: string) {
-  activeTag.value = activeTag.value === tag ? "" : tag;
-}
-
-function clearFilter() {
-  activeTag.value = "";
-}
 
 async function onSelect(mat: Material) {
   try {
@@ -265,13 +236,6 @@ function onBack() {
   xpPopup.value = 0;
 }
 
-function onRandom() {
-  const pool = filteredMaterials.value;
-  if (pool.length === 0) return;
-  const mat = pool[Math.floor(Math.random() * pool.length)];
-  onSelect(mat);
-}
-
 function onComplete() {
   showCompletion.value = true;
 }
@@ -322,57 +286,6 @@ h1 {
 
 .empty-state a {
   color: #93c5fd;
-}
-
-.material-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.material-card {
-  padding: 1rem;
-  background: #1e293b;
-  border: 1px solid #333;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-
-.material-card:hover {
-  border-color: #3b82f6;
-}
-
-.material-card h3 {
-  margin: 0 0 0.5rem;
-}
-
-.tags {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.tag {
-  padding: 0.15rem 0.5rem;
-  background: #2a2a4a;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  color: #93c5fd;
-  cursor: pointer;
-}
-
-.tag.active {
-  background: #1e3a5f;
-  border: 1px solid #3b82f6;
-}
-
-.active-filter {
-  margin-bottom: 0.75rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #aaa;
-  font-size: 0.9rem;
 }
 
 .btn-back {
@@ -551,24 +464,6 @@ h1 {
 }
 
 .btn-home:hover {
-  opacity: 0.9;
-}
-
-.btn-random {
-  display: block;
-  width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  background: linear-gradient(135deg, #f59e0b, #ef4444);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.btn-random:hover {
   opacity: 0.9;
 }
 </style>

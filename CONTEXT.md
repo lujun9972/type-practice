@@ -36,9 +36,24 @@ _Avoid_: 跳跃、忽略
 打字判定模式——打错的字符标红，用户可退格修正，以退格后的最终结果判定对错。
 _Avoid_: 纠错模式、严格模式、宽松模式
 
+**Continuous Playback**:
+Video Material 的视频播放策略——Segment 之间不 seek，始终从当前位置连续播放到下一个 Segment 的 endTimeMs 后暂停。打字与视频并行进行，用户比视频快时等待视频播到终点。恢复 Progress 时例外，允许 seek。
+
 **Progress**:
 用户在某篇 Material 上的打字进度，记录到哪个 Segment 为止，以及每个已完成 Segment 的准确率和用时。存储在后端（单用户模式）。
 _Avoid_: 存档、记录
+
+**Daily Goal (今日目标)**:
+用户每天设定的练习目标。有两种度量方式互斥选择：XP 目标（累积经验值）或时间目标（累积练习分钟数）。同一天只能有一种，但可中途切换并保留已有累积。完成当日目标即计入连击。
+_Avoid_: 每日任务、打卡
+
+**XP Goal**:
+以累积 XP 衡量的 Daily Goal。预设三档：轻松 80 XP / 正常 150 XP / 挑战 300 XP。
+_Avoid_: 经验目标
+
+**Time Goal**:
+以累积练习时间衡量的 Daily Goal。预设三档：轻松 5 分钟 / 正常 10 分钟 / 挑战 20 分钟。时间来自已完成 Segment 的 timeMs 加总，内部存秒、显示分钟。支持自定义 5–60 分钟（步进 1）。
+_Avoid_: 时长目标、时间任务
 
 ## Relationships
 
@@ -46,6 +61,7 @@ _Avoid_: 存档、记录
 - 每个 **Segment** 必须被 **Unlock**（打完）后才能看到下一个
 - 图片在用户打完其前方 **Segment** 后 **Unlock**
 - 用户可以随时使用 **Hint**（无限制）或 **Skip**（有限制）来应对困难
+- 用户每天设定一个 **Daily Goal**，在 **XP Goal** 和 **Time Goal** 之间互斥选择，可中途切换并保留已有累积
 - **Material** 有三个来源：**Material Library**、URL 抓取、LLM 话题生成
 - URL 抓取和 AI 生成可在管理页预览、编辑标题/标签后保存到 Material Library
 - LLM 生成时用户可指定字数范围（最少-最多），也可选"自动"让 LLM 自行决定
@@ -53,12 +69,16 @@ _Avoid_: 存档、记录
 - 继续 Progress 时，已打 Segment 显示成绩（只读），从断点开始打
 - 重新开始清空该 Material 的所有旧 Progress
 - Material 内容被编辑（导致重新分段）时，关联 Progress 自动清空
+- 用户在练习页和管理页均可通过**搜索标题/标签名**和**多标签 AND 过滤**缩小素材范围，搜索与标签过滤取交集
+- 标签栏默认显示素材数量最多的前 8 个标签，超过可展开全部；返回素材列表后过滤状态保留
 
 ### Video Material 关系
 
 - **Video Material** 在管理页通过上传视频文件 + 字幕文件（SRT/VTT）创建
 - 字幕文件由后端解析为带时间戳的 **Segment**，并自动清洗格式标签
-- 用户打完一个 **Segment** 后，视频从该字幕开始时间播放到下一句字幕开始时间，然后暂停
+- 用户打完一个 **Segment** 后，视频从当前位置**连续播放**到下一个 Segment 的 endTimeMs，然后暂停等待用户打字
+- 进入 Video Material 打字时，视频从 0 秒播放到第一条字幕的 startTimeMs，然后暂停
+- **Continuous Playback**：视频在 Segment 之间不做 seek（不跳跃），始终从当前位置连续播放；**恢复 Progress 时例外**，允许 seek 到断点位置
 - 视频 Material 与文本 Material 共享同一套 **Progress**、**XP**、**Hint**、**Skip** 机制
 - 删除 Video Material 时同时删除磁盘上的视频文件
 - 导出时只导出字幕元数据，不包含视频文件；导入时需重新上传视频
@@ -86,3 +106,5 @@ _Avoid_: 存档、记录
 - "打字" 同时指中文输入和英文输入——已明确：两者都支持，中文仅比对最终输出汉字，不关心输入法按键序列。
 - "一行" 指视觉行还是内容段——已明确：不使用视觉行，使用 **Segment**（自然断点切分）。
 - Video Material 与文本 Material 是否是不同概念——已明确：是同一概念的不同来源，统一在 Material 模型下。
+- XP Goal 与 Time Goal 能否同一天并存——已明确：互斥，同一天只激活一种，但可切换并保留累积。
+- 练习时间怎么算——已明确：已完成 Segment 的 timeMs 累加，非墙钟时间。

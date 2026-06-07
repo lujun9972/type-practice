@@ -25,23 +25,88 @@
     <div class="daily-goal-section">
       <template v-if="!stats.todayTarget">
         <h3>选择今日目标</h3>
-        <div class="goal-buttons">
-          <button @click="selectGoal('easy')" class="goal-btn easy">轻松 (80 XP)</button>
-          <button @click="selectGoal('normal')" class="goal-btn normal">正常 (150 XP)</button>
-          <button @click="selectGoal('challenge')" class="goal-btn challenge">挑战 (300 XP)</button>
+        <div class="goal-tabs">
+          <button
+            :class="['goal-tab', { active: activeTab === 'xp' }]"
+            @click="activeTab = 'xp'"
+          >按 XP</button>
+          <button
+            :class="['goal-tab', { active: activeTab === 'time' }]"
+            @click="activeTab = 'time'"
+          >按时间</button>
         </div>
+
+        <template v-if="activeTab === 'xp'">
+          <div class="goal-buttons">
+            <button @click="selectGoal('easy', 'xp')" class="goal-btn easy">轻松 (80 XP)</button>
+            <button @click="selectGoal('normal', 'xp')" class="goal-btn normal">正常 (150 XP)</button>
+            <button @click="selectGoal('challenge', 'xp')" class="goal-btn challenge">挑战 (300 XP)</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="goal-buttons">
+            <button @click="selectGoal('easy', 'time')" class="goal-btn easy">轻松 (5 分钟)</button>
+            <button @click="selectGoal('normal', 'time')" class="goal-btn normal">正常 (10 分钟)</button>
+            <button @click="selectGoal('challenge', 'time')" class="goal-btn challenge">挑战 (20 分钟)</button>
+          </div>
+          <div class="custom-goal">
+            <label>自定义</label>
+            <input
+              v-model.number="customMinutes"
+              type="number"
+              min="5"
+              max="60"
+              step="1"
+              placeholder="分钟"
+              class="custom-input"
+            />
+            <button @click="selectCustomGoal" class="goal-btn custom-go">确定</button>
+          </div>
+        </template>
       </template>
+
       <template v-else-if="stats.todayCompleted">
         <div class="goal-complete">今日目标已完成！</div>
+        <div v-if="stats.goalType" class="goal-type-switch">
+          <button
+            v-if="stats.goalType === 'xp'"
+            class="switch-btn"
+            @click="switchGoalType('time')"
+          >切换到按时间</button>
+          <button
+            v-else
+            class="switch-btn"
+            @click="switchGoalType('xp')"
+          >切换到按 XP</button>
+        </div>
       </template>
+
       <template v-else>
         <div class="goal-progress">
           <div class="xp-bar-container">
             <div class="xp-bar daily" :style="{ width: dailyPercent + '%' }"></div>
           </div>
           <div class="xp-text">
-            <span>{{ stats.todayEarned }}</span> / <span>{{ stats.todayTarget }}</span> XP
+            <template v-if="stats.goalType === 'time'">
+              <span>{{ Math.floor(stats.todayEarned / 60) }}</span> / <span>{{ Math.floor(stats.todayTarget! / 60) }}</span> 分钟
+            </template>
+            <template v-else>
+              <span>{{ stats.todayEarned }}</span> / <span>{{ stats.todayTarget }}</span> XP
+            </template>
           </div>
+        </div>
+        <div class="goal-type-switch">
+          <button
+            v-if="stats.goalType === 'xp'"
+            class="switch-btn"
+            @click="switchGoalType('time')"
+          >切换到按时间</button>
+          <button
+            v-else
+            class="switch-btn"
+            @click="switchGoalType('xp')"
+          >切换到按 XP</button>
         </div>
       </template>
     </div>
@@ -65,7 +130,12 @@ const stats = ref<Stats>({
   todayTarget: null,
   todayEarned: 0,
   todayCompleted: false,
+  goalType: null,
+  todayTimeEarned: 0,
 });
+
+const activeTab = ref<"xp" | "time">("xp");
+const customMinutes = ref<number>(10);
 
 const xpPercent = computed(() => {
   if (!stats.value.nextLevelXp) return 100;
@@ -83,8 +153,21 @@ async function loadStats() {
   stats.value = await getStats();
 }
 
-async function selectGoal(difficulty: "easy" | "normal" | "challenge") {
-  stats.value = await setDailyGoal(difficulty);
+async function selectGoal(difficulty: "easy" | "normal" | "challenge", goalType: "xp" | "time") {
+  stats.value = await setDailyGoal({ difficulty, goal_type: goalType });
+}
+
+async function selectCustomGoal() {
+  const mins = customMinutes.value;
+  if (!mins || mins < 5 || mins > 60) return;
+  stats.value = await setDailyGoal({ difficulty: "custom", goal_type: "time", custom_minutes: mins });
+}
+
+async function switchGoalType(goalType: "xp" | "time") {
+  const difficulty = stats.value.goalType === "time"
+    ? (stats.value.todayTarget! >= 300 ? "easy" : stats.value.todayTarget! >= 150 ? "normal" : "challenge")
+    : "easy";
+  stats.value = await setDailyGoal({ difficulty, goal_type: goalType });
 }
 
 onMounted(loadStats);
@@ -165,6 +248,38 @@ onMounted(loadStats);
   color: #ccc;
 }
 
+.goal-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0.75rem;
+  justify-content: center;
+}
+
+.goal-tab {
+  padding: 0.4rem 1.2rem;
+  border: 1px solid #555;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.goal-tab:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.goal-tab:last-child {
+  border-radius: 0 8px 8px 0;
+  border-left: none;
+}
+
+.goal-tab.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
 .goal-buttons {
   display: flex;
   gap: 0.5rem;
@@ -194,10 +309,63 @@ onMounted(loadStats);
   color: #fff;
 }
 
+.custom-goal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.custom-goal label {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.custom-input {
+  width: 60px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #222;
+  color: #fff;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.custom-go {
+  background: #6366f1;
+  color: #fff;
+  padding: 0.3rem 0.8rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
 .goal-complete {
   color: #10b981;
   font-size: 1.1rem;
   font-weight: bold;
+}
+
+.goal-type-switch {
+  margin-top: 0.5rem;
+}
+
+.switch-btn {
+  background: transparent;
+  border: 1px solid #555;
+  color: #888;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.switch-btn:hover {
+  border-color: #888;
+  color: #ccc;
 }
 
 .start-btn {

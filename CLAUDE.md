@@ -49,6 +49,13 @@ Single-context layout: CONTEXT.md + docs/adr/ at repo root. See `docs/agents/dom
 - `PlayPage.segmentResults` 类型和 `onSegmentComplete` 参数类型必须同步包含 `correctChars`
 - 每段完成后通过 `xpPopup` 显示 "+N XP" 浮动提示（1.5s 自动消失），全部完成时在完成界面汇总
 
+### 开发服务器管理
+
+- **必须通过 `./dev.sh start/stop/status` 管理服务器，禁止直接运行 `npm run dev` 或 `uvicorn`**
+- `dev.sh` 通过 PID 文件 (`run/dev.pid`) 追踪进程，直接启动的进程不受管理
+- 直接启动的进程会占用端口，导致 `dev.sh start` 启动失败或行为异常
+- 如果怀疑有残留进程，先 `./dev.sh stop`，再 `ss -tlnp | grep -E '8000|5173'` 检查，手动 `kill -9` 残留进程
+
 ### 前后端事件字段同步
 
 - `TypingSession` emit 的字段必须与 `PlayPage` 的事件处理参数类型、后端 `save_progress` 读取的字段三方一致

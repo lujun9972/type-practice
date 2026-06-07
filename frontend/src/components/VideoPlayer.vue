@@ -32,14 +32,17 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 
-const props = defineProps<{
-  videoUrl: string;
-  startTimeMs: number | null;
-  nextStartTimeMs: number | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    videoUrl: string;
+    playUntilMs: number | null;
+    playFromStart?: boolean;
+  }>(),
+  { playFromStart: false },
+);
 
 const emit = defineEmits<{
-  segmentPlaybackComplete: [];
+  reachedTarget: [];
   buffered: [];
 }>();
 
@@ -47,7 +50,7 @@ const videoEl = ref<HTMLVideoElement | null>(null);
 const loading = ref(true);
 const volume = ref(0.7);
 const progressPercent = ref(0);
-let playbackTimer: ReturnType<typeof setTimeout> | null = null;
+let targetMs: number | null = null;
 
 function onLoadedData() {
   loading.value = false;
@@ -61,11 +64,20 @@ function onTimeUpdate() {
   if (!videoEl.value) return;
   const duration = videoEl.value.duration || 1;
   progressPercent.value = (videoEl.value.currentTime / duration) * 100;
+
+  if (targetMs !== null) {
+    const targetSec = targetMs / 1000;
+    if (videoEl.value.currentTime >= targetSec) {
+      targetMs = null;
+      videoEl.value.pause();
+      emit("reachedTarget");
+    }
+  }
 }
 
 function onEnded() {
-  stopPlaybackTimer();
-  emit("segmentPlaybackComplete");
+  targetMs = null;
+  emit("reachedTarget");
 }
 
 function onVolumeChange(e: Event) {
@@ -76,54 +88,38 @@ function onVolumeChange(e: Event) {
   }
 }
 
-function stopPlaybackTimer() {
-  if (playbackTimer !== null) {
-    clearTimeout(playbackTimer);
-    playbackTimer = null;
-  }
-}
-
-function playSegment() {
+function playUntil(ms: number) {
   const video = videoEl.value;
-  if (!video || props.startTimeMs === null) return;
-
-  stopPlaybackTimer();
-
-  const startSec = props.startTimeMs / 1000;
-  const endSec = props.nextStartTimeMs !== null ? props.nextStartTimeMs / 1000 : video.duration;
-
-  video.currentTime = startSec;
+  if (!video) return;
+  targetMs = ms;
   video.play().catch(() => {});
-
-  if (endSec && isFinite(endSec)) {
-    const durationMs = (endSec - startSec) * 1000;
-    playbackTimer = setTimeout(() => {
-      video.pause();
-      emit("segmentPlaybackComplete");
-    }, Math.max(durationMs, 100));
-  }
 }
-
-watch(() => props.startTimeMs, (newVal) => {
-  if (newVal !== null && !loading.value) {
-    playSegment();
-  }
-});
-
-watch(loading, (isLoading) => {
-  if (!isLoading && props.startTimeMs !== null) {
-    playSegment();
-  }
-});
 
 function seekTo(timeMs: number) {
   const video = videoEl.value;
   if (!video) return;
+  targetMs = null;
   video.currentTime = timeMs / 1000;
   video.pause();
 }
 
-defineExpose({ playSegment, seekTo });
+watch(() => props.playUntilMs, (newVal) => {
+  if (newVal !== null && !loading.value) {
+    playUntil(newVal);
+  }
+});
+
+watch(loading, (isLoading) => {
+  if (!isLoading && props.playFromStart && props.playUntilMs !== null) {
+    const video = videoEl.value;
+    if (video) {
+      video.currentTime = 0;
+    }
+    playUntil(props.playUntilMs);
+  }
+});
+
+defineExpose({ playUntil, seekTo });
 </script>
 
 <style scoped>

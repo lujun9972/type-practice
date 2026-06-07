@@ -156,6 +156,108 @@ class TestRepairItem:
         assert store.get_stats(date="2026-06-21")["streak"]["repairItems"] == 3
 
 
+class TestTimeGoal:
+    def test_set_time_goal_stores_type_and_target(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        stats = store.get_stats(date="2026-06-01")
+        assert stats["goalType"] == "time"
+        assert stats["todayTarget"] == 300  # 5 minutes in seconds
+        assert stats["todayEarned"] == 0
+
+    def test_time_goal_easy_is_300_seconds(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayTarget"] == 300
+
+    def test_time_goal_normal_is_600_seconds(self, store):
+        store.set_daily_goal("normal", goal_type="time", date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayTarget"] == 600
+
+    def test_time_goal_challenge_is_1200_seconds(self, store):
+        store.set_daily_goal("challenge", goal_type="time", date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayTarget"] == 1200
+
+    def test_custom_time_goal(self, store):
+        store.set_daily_goal("custom", goal_type="time", custom_minutes=15, date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayTarget"] == 900
+
+    def test_custom_time_too_low_raises(self, store):
+        with pytest.raises(ValueError):
+            store.set_daily_goal("custom", goal_type="time", custom_minutes=4, date="2026-06-01")
+
+    def test_custom_time_too_high_raises(self, store):
+        with pytest.raises(ValueError):
+            store.set_daily_goal("custom", goal_type="time", custom_minutes=61, date="2026-06-01")
+
+    def test_add_time_accumulates_earned_for_time_goal(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(120, date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayEarned"] == 120
+
+    def test_add_time_updates_time_history_regardless_of_goal_type(self, store):
+        store.set_daily_goal("easy", goal_type="xp", date="2026-06-01")
+        store.add_time(60, date="2026-06-01")
+        stats = store.get_stats(date="2026-06-01")
+        assert stats["todayEarned"] == 0  # XP earned unchanged
+        assert stats["todayTimeEarned"] == 60
+
+    def test_time_goal_completed_when_earned_meets_target(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(300, date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayCompleted"] is True
+
+    def test_time_goal_not_completed_when_short(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(299, date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayCompleted"] is False
+
+
+class TestTimeGoalStreak:
+    def test_one_completed_time_day_gives_streak_1(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(300, date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["streak"]["current"] == 1
+
+    def test_consecutive_time_days_increase_streak(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(300, date="2026-06-01")
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-02")
+        store.add_time(300, date="2026-06-02")
+        assert store.get_stats(date="2026-06-02")["streak"]["current"] == 2
+
+    def test_mixed_xp_and_time_goals_both_count_for_streak(self, store):
+        store.set_daily_goal("easy", goal_type="xp", date="2026-06-01")
+        store.add_xp(80, date="2026-06-01")
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-02")
+        store.add_time(300, date="2026-06-02")
+        assert store.get_stats(date="2026-06-02")["streak"]["current"] == 2
+
+
+class TestGoalTypeSwitch:
+    def test_switch_xp_to_time_preserves_time_earned(self, store):
+        store.set_daily_goal("easy", goal_type="xp", date="2026-06-01")
+        store.add_xp(50, date="2026-06-01")
+        store.add_time(180, date="2026-06-01")
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        stats = store.get_stats(date="2026-06-01")
+        assert stats["goalType"] == "time"
+        assert stats["todayEarned"] == 180  # from timeHistory
+
+    def test_switch_time_to_xp_preserves_xp_earned(self, store):
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        store.add_time(300, date="2026-06-01")
+        store.add_xp(60, date="2026-06-01")
+        store.set_daily_goal("easy", goal_type="xp", date="2026-06-01")
+        stats = store.get_stats(date="2026-06-01")
+        assert stats["goalType"] == "xp"
+        assert stats["todayEarned"] == 60  # from xpHistory
+
+    def test_switch_to_time_goal_already_completed(self, store):
+        store.set_daily_goal("easy", goal_type="xp", date="2026-06-01")
+        store.add_time(400, date="2026-06-01")
+        store.set_daily_goal("easy", goal_type="time", date="2026-06-01")
+        assert store.get_stats(date="2026-06-01")["todayCompleted"] is True
+
+
 class TestPersistence:
     def test_data_survives_reload(self, tmp_path):
         path = tmp_path / "stats.json"

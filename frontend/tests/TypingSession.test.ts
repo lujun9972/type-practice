@@ -218,3 +218,100 @@ describe("TypingSession — results", () => {
     expect(result.text()).toContain("速度");
   });
 });
+
+const VIDEO_SEGMENTS = [
+  { type: "text", content: "第一段。", startTimeMs: 1000, endTimeMs: 4000 },
+  { type: "text", content: "第二段。", startTimeMs: 5000, endTimeMs: 8000 },
+  { type: "text", content: "第三段。", startTimeMs: 10000, endTimeMs: 13000 },
+];
+
+describe("TypingSession — video continuous playback", () => {
+  function mountWithVideo(props = {}) {
+    return mount(TypingSession, {
+      props: { segments: VIDEO_SEGMENTS, videoUrl: "test.mp4", ...props },
+      global: {
+        stubs: {
+          VideoPlayer: true,
+        },
+      },
+    });
+  }
+
+  async function resolveVideoBuffering(wrapper: ReturnType<typeof mount>) {
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    await vp.vm.$emit("buffered");
+  }
+
+  it("on video buffered, sets playUntilMs to first segment startTimeMs", async () => {
+    const wrapper = mountWithVideo();
+    await resolveVideoBuffering(wrapper);
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    expect(vp.props("playUntilMs")).toBe(1000);
+    expect(vp.props("playFromStart")).toBe(true);
+  });
+
+  it("completing segment 0 sets playUntilMs to segment 1 endTimeMs", async () => {
+    const wrapper = mountWithVideo();
+    await resolveVideoBuffering(wrapper);
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    await vp.vm.$emit("reachedTarget");
+    await completeSegment(wrapper, 0);
+    expect(vp.props("playUntilMs")).toBe(8000);
+  });
+
+  it("last segment sets playUntilMs to null (play to end)", async () => {
+    const wrapper = mountWithVideo();
+    await resolveVideoBuffering(wrapper);
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    await vp.vm.$emit("reachedTarget");
+    await completeSegment(wrapper, 0);
+    await vp.vm.$emit("reachedTarget");
+    await completeSegment(wrapper, 1);
+    await vp.vm.$emit("reachedTarget");
+    await completeSegment(wrapper, 2);
+    expect(vp.props("playUntilMs")).toBeNull();
+  });
+
+  it("skip triggers same video behavior as complete", async () => {
+    const wrapper = mountWithVideo({ skipLimit: 3 });
+    await resolveVideoBuffering(wrapper);
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    await vp.vm.$emit("reachedTarget");
+    await wrapper.find(".btn-skip").trigger("click");
+    expect(vp.props("playUntilMs")).toBe(8000);
+  });
+
+  it("pending advance fires when user finishes before video reaches target", async () => {
+    const wrapper = mountWithVideo();
+    await resolveVideoBuffering(wrapper);
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+    await vp.vm.$emit("reachedTarget");
+    await completeSegment(wrapper, 0);
+    expect(vp.props("playUntilMs")).toBe(8000);
+
+    await completeSegment(wrapper, 1);
+    // video hasn't reached 8000 yet → pending advance
+    expect(vp.props("playUntilMs")).toBe(8000);
+
+    await vp.vm.$emit("reachedTarget");
+    // pending advance fires: playUntilMs → seg[2].endTimeMs
+    expect(vp.props("playUntilMs")).toBe(13000);
+
+    await vp.vm.$emit("reachedTarget");
+    // now video reached 13000 and user hasn't finished seg 2 yet
+    expect(vp.props("playUntilMs")).toBeNull();
+  });
+
+  it("resume with startIndex seeks to segment and plays to its endTimeMs", async () => {
+    const wrapper = mountWithVideo({ startIndex: 1 });
+    const vp = wrapper.findComponent({ name: "VideoPlayer" });
+
+    const seekTo = vi.fn();
+    (wrapper.vm as unknown as { videoPlayerRef?: { seekTo: typeof seekTo } }).videoPlayerRef = { seekTo };
+
+    await vp.vm.$emit("buffered");
+
+    expect(seekTo).toHaveBeenCalledWith(5000);
+    expect(vp.props("playUntilMs")).toBe(8000);
+  });
+});

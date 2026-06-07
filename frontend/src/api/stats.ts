@@ -13,6 +13,8 @@ export interface Stats {
   todayTarget: number | null;
   todayEarned: number;
   todayCompleted: boolean;
+  goalType: "xp" | "time" | null;
+  todayTimeEarned: number;
 }
 
 export async function getStats(): Promise<Stats> {
@@ -20,13 +22,15 @@ export async function getStats(): Promise<Stats> {
   return resp.json();
 }
 
-export async function setDailyGoal(
-  difficulty: "easy" | "normal" | "challenge",
-): Promise<Stats> {
+export async function setDailyGoal(params: {
+  difficulty: "easy" | "normal" | "challenge" | "custom";
+  goal_type: "xp" | "time";
+  custom_minutes?: number;
+}): Promise<Stats> {
   const resp = await fetch(`${API_BASE}/stats/daily-goal`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ difficulty }),
+    body: JSON.stringify(params),
   });
   return resp.json();
 }
